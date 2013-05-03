@@ -371,11 +371,19 @@ public:
     OsdBufferGenerator() {}
     virtual ~OsdBufferGenerator() {}
 
+#if MAYA_API_VERSION >= 201400
+    virtual bool getSourceIndexing(
+        const MObject &object,
+        MHWRender::MComponentDataIndexing &sourceIndexing) const
+    {
+        MFnMesh mesh(object);
+#else
     virtual bool getSourceIndexing(
         const MDagPath &dagPath,
         MHWRender::MComponentDataIndexing &sourceIndexing) const
     {
         MFnMesh mesh(dagPath.node());
+#endif
 
         MIntArray vertexCount, vertexList;
         mesh.getVertices(vertexCount, vertexList);
@@ -389,15 +397,24 @@ public:
         return true;
     }
 
+#if MAYA_API_VERSION >= 201400
+    virtual bool getSourceStreams(const MObject &object,
+                                  MStringArray &) const
+#else
     virtual bool getSourceStreams(const MDagPath &dagPath,
                                   MStringArray &) const
+#endif
     {
         return false;
     }
 
 #if MAYA_API_VERSION >= 201350
     virtual void createVertexStream(
+#if MAYA_API_VERSION >= 201400
+        const MObject &object, 
+#else
         const MDagPath &dagPath, 
+#endif        
               MVertexBuffer &vertexBuffer,
         const MComponentDataIndexing &targetIndexing,
         const MComponentDataIndexing &,
@@ -410,7 +427,11 @@ public:
     {
 #endif
 
+#if MAYA_API_VERSION >= 201400
+        MFnMesh meshFn(object);
+#else
         MFnMesh meshFn(dagPath);
+#endif
         int nVertices = meshFn.numVertices();
         MFloatPointArray points;
         meshFn.getPoints(points);

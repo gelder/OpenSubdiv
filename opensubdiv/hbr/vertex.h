@@ -275,6 +275,9 @@ public:
         validmask = 0;
     }
 
+    // True if the edge has a subdivided child vertex
+    bool HasChild() const { return vchild!=-1; }
+
     // Remove the reference to subdivided vertex
     void RemoveChild() { vchild = -1; }
 
@@ -547,7 +550,8 @@ HbrVertex<T>::AddIncidentEdge(HbrHalfedge<T>* edge) {
     // will always be a boundary edge if possible. If any of the
     // incident edges are no longer boundaries at this point then they
     // can be immediately removed.
-    int i, newEdgeCount = 0;
+    int i;
+    unsigned short newEdgeCount = 0;
     bool edgeFound = false;
     HbrHalfedge<T>** incidentEdges =
         (nIncidentEdges > 1) ? incident.edges : &incident.edge;

@@ -56,11 +56,24 @@
 //
 
 #if defined(__APPLE__)
-    #include <GLUT/glut.h>
+    #include <OpenGL/gl3.h>
+    #define GLFW_INCLUDE_GL3
+    #define GLFW_NO_GLU
 #else
     #include <stdlib.h>
     #include <GL/glew.h>
-    #include <GL/glut.h>
+    #if defined(_WIN32)
+        // XXX Must include windows.h here or GLFW pollutes the global namespace
+        #define WIN32_LEAN_AND_MEAN
+        #include <windows.h>
+    #endif
+#endif
+
+#if defined(GLFW_VERSION_3)
+    #include <GL/glfw3.h>
+    GLFWwindow* g_window=0;
+#else
+    #include <GL/glfw.h>
 #endif
 
 #include <stdio.h>
@@ -76,12 +89,20 @@
 #include <osd/cpuComputeController.h>
 #include <osd/cpuComputeContext.h>
 
+#include <osd/cpuGLVertexBuffer.h>
+
 #ifdef OPENSUBDIV_HAS_CUDA
     #include <osd/cudaDispatcher.h>
 #endif
 
 #ifdef OPENSUBDIV_HAS_OPENCL
+    #include <osd/clComputeContext.h>
+    #include <osd/clComputeController.h>
     #include <osd/clDispatcher.h>
+    #include <osd/clGLVertexBuffer.h>
+    static cl_context g_clContext;
+    static cl_command_queue g_clQueue;
+    #include "../../examples/common/clInit.h" // XXXX TODO move file out of examples
 #endif
 
 #include "../common/shape_utils.h"
@@ -98,6 +119,22 @@
 // - only vertex interpolation is being tested at the moment.
 //
 #define PRECISION 1e-6
+
+//------------------------------------------------------------------------------
+enum BackendType {
+    kBackendCPU   = 0, // raw CPU
+    kBackendCPUGL = 1, // CPU with GL-backed buffer
+    kBackendCL    = 2, // OpenCL
+    kBackendCount
+};
+
+static const char* g_BackendNames[kBackendCount] = {
+    "CPU",
+    "CPUGL",
+    "CL",
+};
+
+static int g_Backend = -1;
 
 //------------------------------------------------------------------------------
 // Vertex class implementation
@@ -171,6 +208,7 @@ private:
 };
 
 //------------------------------------------------------------------------------
+
 class xyzFV;
 typedef OpenSubdiv::HbrMesh<xyzVV>           xyzmesh;
 typedef OpenSubdiv::HbrFace<xyzVV>           xyzface;
@@ -183,9 +221,11 @@ typedef OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>     OsdHbrMesh;
 typedef OpenSubdiv::HbrVertex<OpenSubdiv::OsdVertex>   OsdHbrVertex;
 typedef OpenSubdiv::HbrFace<OpenSubdiv::OsdVertex>     OsdHbrFace;
 typedef OpenSubdiv::HbrHalfedge<OpenSubdiv::OsdVertex> OsdHbrHalfedge;
+
 //------------------------------------------------------------------------------
 // Returns true if a vertex or any of its parents is on a boundary
-bool VertexOnBoundary( xyzvertex const * v ) {
+bool 
+VertexOnBoundary( xyzvertex const * v ) {
 
     if (not v)
         return false;
@@ -218,10 +258,9 @@ bool VertexOnBoundary( xyzvertex const * v ) {
 }
 
 //------------------------------------------------------------------------------
+int 
+checkVertexBuffer( xyzmesh * hmesh, const float * vbData, int numElements, std::vector<int> const & remap) {
 
-int checkVertexBuffer( xyzmesh * hmesh,
-                       OpenSubdiv::OsdCpuVertexBuffer * vb,
-                       std::vector<int> const & remap) {
     int count=0;
     float deltaAvg[3] = {0.0f, 0.0f, 0.0f},
           deltaCnt[3] = {0.0f, 0.0f, 0.0f};
@@ -231,7 +270,7 @@ int checkVertexBuffer( xyzmesh * hmesh,
 
         xyzvertex * hv = hmesh->GetVertex(i);
 
-        float * ov = & vb->BindCpuBuffer()[ remap[ hv->GetID() ] * vb->GetNumElements() ];
+        const float * ov = & vbData[ remap[ hv->GetID() ] * numElements ];
 
         // boundary interpolation rules set to "none" produce "undefined" vertices on
         // boundary vertices : far does not match hbr for those, so skip comparison.
@@ -288,7 +327,8 @@ int checkVertexBuffer( xyzmesh * hmesh,
 }
 
 //------------------------------------------------------------------------------
-static void refine( xyzmesh * mesh, int maxlevel ) {
+static void 
+refine( xyzmesh * mesh, int maxlevel ) {
 
     for (int l=0; l<maxlevel; ++l ) {
         int nfaces = mesh->GetNumFaces();
@@ -298,11 +338,86 @@ static void refine( xyzmesh * mesh, int maxlevel ) {
                 f->Refine();
         }
     }
-
 }
 
 //------------------------------------------------------------------------------
-int checkMesh( char const * msg, char const * shape, int levels, Scheme scheme=kCatmark ) {
+static int 
+checkMeshCPU( OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>* farmesh,
+              const std::vector<float>& coarseverts,
+              xyzmesh * refmesh,
+              const std::vector<int>& remap) {
+                  
+    static OpenSubdiv::OsdCpuComputeController *controller = new OpenSubdiv::OsdCpuComputeController();
+    
+    OpenSubdiv::OsdCpuComputeContext *context = OpenSubdiv::OsdCpuComputeContext::Create(farmesh);
+    
+    OpenSubdiv::OsdCpuVertexBuffer * vb = OpenSubdiv::OsdCpuVertexBuffer::Create(3, farmesh->GetNumVertices());
+    
+    vb->UpdateData( & coarseverts[0], (int)coarseverts.size()/3 );
+    
+    controller->Refine( context, vb );
+    
+    return checkVertexBuffer(refmesh, vb->BindCpuBuffer(), vb->GetNumElements(), remap);
+}
+
+//------------------------------------------------------------------------------
+static int 
+checkMeshCPUGL( OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>* farmesh,
+                const std::vector<float>& coarseverts,
+                xyzmesh * refmesh,
+                const std::vector<int>& remap) {
+                    
+    static OpenSubdiv::OsdCpuComputeController *controller = new OpenSubdiv::OsdCpuComputeController();
+    
+    OpenSubdiv::OsdCpuComputeContext *context = OpenSubdiv::OsdCpuComputeContext::Create(farmesh);
+    
+    OpenSubdiv::OsdCpuGLVertexBuffer * vb = OpenSubdiv::OsdCpuGLVertexBuffer::Create(3, farmesh->GetNumVertices());
+    
+    vb->UpdateData( & coarseverts[0], (int)coarseverts.size()/3 );
+    
+    controller->Refine( context, vb );
+    
+    return checkVertexBuffer(refmesh, vb->BindCpuBuffer(), vb->GetNumElements(), remap);
+}
+
+//------------------------------------------------------------------------------
+static int 
+checkMeshCL( OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>* farmesh,
+             const std::vector<float>& coarseverts,
+             xyzmesh * refmesh,
+             const std::vector<int>& remap ) {
+
+#ifdef OPENSUBDIV_HAS_OPENCL
+
+    static OpenSubdiv::OsdCLComputeController *controller = new OpenSubdiv::OsdCLComputeController(g_clContext, g_clQueue);
+    
+    OpenSubdiv::OsdCLComputeContext *context = OpenSubdiv::OsdCLComputeContext::Create(farmesh, g_clContext);
+    
+    OpenSubdiv::OsdCLGLVertexBuffer * vb = OpenSubdiv::OsdCLGLVertexBuffer::Create(3, farmesh->GetNumVertices(), g_clContext);
+    
+    vb->UpdateData( & coarseverts[0], (int)coarseverts.size()/3, g_clQueue );
+    
+    controller->Refine( context, vb );
+
+    // read data back from CL buffer
+    size_t dataSize = vb->GetNumVertices() * vb->GetNumElements();
+    float* data = new float[dataSize];
+    
+    clEnqueueReadBuffer (g_clQueue, vb->BindCLBuffer(g_clQueue), CL_TRUE, 0, dataSize * sizeof(float), data, 0, NULL, NULL);
+    
+    int result = checkVertexBuffer(refmesh, data, vb->GetNumElements(), remap);
+    
+    delete[] data;
+    
+    return result;
+#else
+    return 0;
+#endif
+}
+
+//------------------------------------------------------------------------------
+static int 
+checkMesh( char const * msg, char const * shape, int levels, Scheme scheme, int backend ) {
 
     int result =0;
 
@@ -317,25 +432,16 @@ int checkMesh( char const * msg, char const * shape, int levels, Scheme scheme=k
 
     OsdHbrMesh * hmesh = simpleHbr<OpenSubdiv::OsdVertex>(shape, scheme, coarseverts);
 
-    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex> *farmesh;
     OpenSubdiv::FarMeshFactory<OpenSubdiv::OsdVertex> meshFactory(hmesh, levels);
 
-    farmesh = meshFactory.Create();
+    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex> * farmesh = meshFactory.Create();
 
-    static OpenSubdiv::OsdCpuComputeController *controller =
-        new OpenSubdiv::OsdCpuComputeController();
-
-    OpenSubdiv::OsdCpuComputeContext *context = OpenSubdiv::OsdCpuComputeContext::Create(farmesh);
-    
     std::vector<int> remap = meshFactory.GetRemappingTable();
-    {
-        OpenSubdiv::OsdCpuVertexBuffer * vb = OpenSubdiv::OsdCpuVertexBuffer::Create(3, farmesh->GetNumVertices());
 
-        vb->UpdateData( & coarseverts[0], (int)coarseverts.size()/3 );
-
-        controller->Refine( context, vb );
-
-        checkVertexBuffer(refmesh, vb, remap);
+    switch (backend) {
+        case kBackendCPU   : result = checkMeshCPU(farmesh, coarseverts, refmesh, remap); break;
+        case kBackendCPUGL : result = checkMeshCPUGL(farmesh, coarseverts, refmesh, remap); break;
+        case kBackendCL    : result = checkMeshCL(farmesh, coarseverts, refmesh, remap); break;
     }
 
     delete hmesh;
@@ -344,14 +450,23 @@ int checkMesh( char const * msg, char const * shape, int levels, Scheme scheme=k
 }
 
 //------------------------------------------------------------------------------
-int main(int argc, char ** argv) {
+int checkBackend(int backend, int levels) {
 
-    // Make sure we have an OpenGL context.
-    glutInit(&argc, argv);
-    glutCreateWindow("osd_regression");
-    glewInit();
+    printf("*** checking backend : %s\n", g_BackendNames[backend]);
 
-    int levels=5, total=0;
+    if (backend == kBackendCL) {
+#ifdef OPENSUBDIV_HAS_OPENCL
+        if (initCL(&g_clContext, &g_clQueue) == false) {
+            printf("  Cannot initialize OpenCL, skipping...\n");
+            return 0;
+        }
+#else
+        printf("  No OpenCL available, skipping...\n");
+        return 0;
+#endif
+    }
+
+    int total = 0;
 
 #define test_catmark_edgeonly
 #define test_catmark_edgecorner
@@ -385,165 +500,287 @@ int main(int argc, char ** argv) {
 
 #define test_bilinear_cube
 
-    printf("precision : %f\n",PRECISION);
 
 #ifdef test_catmark_edgeonly
 #include "../shapes/catmark_edgeonly.h"
-    total += checkMesh( "test_catmark_edgeonly", catmark_edgeonly, levels, kCatmark );
+    total += checkMesh( "test_catmark_edgeonly", catmark_edgeonly, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_edgecorner
 #include "../shapes/catmark_edgecorner.h"
-    total += checkMesh( "test_catmark_edgeonly", catmark_edgecorner, levels, kCatmark );
+    total += checkMesh( "test_catmark_edgeonly", catmark_edgecorner, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_pyramid
 #include "../shapes/catmark_pyramid.h"
-    total += checkMesh( "test_catmark_pyramid", catmark_pyramid, levels, kCatmark );
+    total += checkMesh( "test_catmark_pyramid", catmark_pyramid, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_pyramid_creases0
 #include "../shapes/catmark_pyramid_creases0.h"
-    total += checkMesh( "test_catmark_pyramid_creases0", catmark_pyramid_creases0, levels, kCatmark );
+    total += checkMesh( "test_catmark_pyramid_creases0", catmark_pyramid_creases0, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_pyramid_creases1
 #include "../shapes/catmark_pyramid_creases1.h"
-    total += checkMesh( "test_catmark_pyramid_creases1", catmark_pyramid_creases1, levels, kCatmark );
+    total += checkMesh( "test_catmark_pyramid_creases1", catmark_pyramid_creases1, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube
 #include "../shapes/catmark_cube.h"
-    total += checkMesh( "test_catmark_cube", catmark_cube, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube", catmark_cube, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_creases0
 #include "../shapes/catmark_cube_creases0.h"
-    total += checkMesh( "test_catmark_cube_creases0", catmark_cube_creases0, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_creases0", catmark_cube_creases0, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_creases1
 #include "../shapes/catmark_cube_creases1.h"
-    total += checkMesh( "test_catmark_cube_creases1", catmark_cube_creases1, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_creases1", catmark_cube_creases1, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_corner0
 #include "../shapes/catmark_cube_corner0.h"
-    total += checkMesh( "test_catmark_cube_corner0", catmark_cube_corner0, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_corner0", catmark_cube_corner0, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_corner1
 #include "../shapes/catmark_cube_corner1.h"
-    total += checkMesh( "test_catmark_cube_corner1", catmark_cube_corner1, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_corner1", catmark_cube_corner1, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_corner2
 #include "../shapes/catmark_cube_corner2.h"
-    total += checkMesh( "test_catmark_cube_corner2", catmark_cube_corner2, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_corner2", catmark_cube_corner2, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_corner3
 #include "../shapes/catmark_cube_corner3.h"
-    total += checkMesh( "test_catmark_cube_corner3", catmark_cube_corner3, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_corner3", catmark_cube_corner3, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_cube_corner4
 #include "../shapes/catmark_cube_corner4.h"
-    total += checkMesh( "test_catmark_cube_corner4", catmark_cube_corner4, levels, kCatmark );
+    total += checkMesh( "test_catmark_cube_corner4", catmark_cube_corner4, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_dart_edgecorner
 #include "../shapes/catmark_dart_edgecorner.h"
-    total += checkMesh( "test_catmark_dart_edgecorner", catmark_dart_edgecorner, levels, kCatmark );
+    total += checkMesh( "test_catmark_dart_edgecorner", catmark_dart_edgecorner, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_dart_edgeonly
 #include "../shapes/catmark_dart_edgeonly.h"
-    total += checkMesh( "test_catmark_dart_edgeonly", catmark_dart_edgeonly, levels, kCatmark );
+    total += checkMesh( "test_catmark_dart_edgeonly", catmark_dart_edgeonly, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_tent
 #include "../shapes/catmark_tent.h"
-    total += checkMesh( "test_catmark_tent", catmark_tent, levels, kCatmark );
+    total += checkMesh( "test_catmark_tent", catmark_tent, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_tent_creases0
 #include "../shapes/catmark_tent_creases0.h"
-    total += checkMesh( "test_catmark_tent_creases0", catmark_tent_creases0, levels );
+    total += checkMesh( "test_catmark_tent_creases0", catmark_tent_creases0, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_tent_creases1
 #include "../shapes/catmark_tent_creases1.h"
-    total += checkMesh( "test_catmark_tent_creases1", catmark_tent_creases1, levels );
+    total += checkMesh( "test_catmark_tent_creases1", catmark_tent_creases1, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_square_hedit0
 #include "../shapes/catmark_square_hedit0.h"
-    total += checkMesh( "test_catmark_square_hedit0", catmark_square_hedit0, levels );
+    total += checkMesh( "test_catmark_square_hedit0", catmark_square_hedit0, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_square_hedit1
 #include "../shapes/catmark_square_hedit1.h"
-    total += checkMesh( "test_catmark_square_hedit1", catmark_square_hedit1, levels );
+    total += checkMesh( "test_catmark_square_hedit1", catmark_square_hedit1, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_square_hedit2
 #include "../shapes/catmark_square_hedit2.h"
-    total += checkMesh( "test_catmark_square_hedit2", catmark_square_hedit2, levels );
+    total += checkMesh( "test_catmark_square_hedit2", catmark_square_hedit2, levels, kCatmark, backend );
 #endif
 
 #ifdef test_catmark_square_hedit3
 #include "../shapes/catmark_square_hedit3.h"
-    total += checkMesh( "test_catmark_square_hedit3", catmark_square_hedit3, levels );
+    total += checkMesh( "test_catmark_square_hedit3", catmark_square_hedit3, levels, kCatmark, backend );
 #endif
 
 
 #ifdef test_loop_triangle_edgeonly
 #include "../shapes/loop_triangle_edgeonly.h"
-    total += checkMesh( "test_loop_triangle_edgeonly", loop_triangle_edgeonly, levels, kLoop );
+    total += checkMesh( "test_loop_triangle_edgeonly", loop_triangle_edgeonly, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_triangle_edgecorner
 #include "../shapes/loop_triangle_edgecorner.h"
-    total += checkMesh( "test_loop_triangle_edgecorner", loop_triangle_edgecorner, levels, kLoop );
+    total += checkMesh( "test_loop_triangle_edgecorner", loop_triangle_edgecorner, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_saddle_edgeonly
 #include "../shapes/loop_saddle_edgeonly.h"
-    total += checkMesh( "test_loop_saddle_edgeonly", loop_saddle_edgeonly, levels, kLoop );
+    total += checkMesh( "test_loop_saddle_edgeonly", loop_saddle_edgeonly, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_saddle_edgecorner
 #include "../shapes/loop_saddle_edgecorner.h"
-    total += checkMesh( "test_loop_saddle_edgecorner", loop_saddle_edgecorner, levels, kLoop );
+    total += checkMesh( "test_loop_saddle_edgecorner", loop_saddle_edgecorner, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_icosahedron
 #include "../shapes/loop_icosahedron.h"
-    total += checkMesh( "test_loop_icosahedron", loop_icosahedron, levels, kLoop );
+    total += checkMesh( "test_loop_icosahedron", loop_icosahedron, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_cube
 #include "../shapes/loop_cube.h"
-    total += checkMesh( "test_loop_cube", loop_cube, levels, kLoop );
+    total += checkMesh( "test_loop_cube", loop_cube, levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_cube_creases0
 #include "../shapes/loop_cube_creases0.h"
-    total += checkMesh( "test_loop_cube_creases0", loop_cube_creases0,levels, kLoop );
+    total += checkMesh( "test_loop_cube_creases0", loop_cube_creases0,levels, kLoop, backend );
 #endif
 
 #ifdef test_loop_cube_creases1
 #include "../shapes/loop_cube_creases1.h"
-    total += checkMesh( "test_loop_cube_creases1", loop_cube_creases1, levels, kLoop );
+    total += checkMesh( "test_loop_cube_creases1", loop_cube_creases1, levels, kLoop, backend );
 #endif
 
 
 
 #ifdef test_bilinear_cube
 #include "../shapes/bilinear_cube.h"
-    total += checkMesh( "test_bilinear_cube", bilinear_cube, levels, kBilinear );
+    total += checkMesh( "test_bilinear_cube", bilinear_cube, levels, kBilinear, backend );
 #endif
+
+
+    if (backend == kBackendCL) {
+#ifdef OPENSUBDIV_HAS_OPENCL
+        uninitCL(g_clContext, g_clQueue);
+#endif
+    }
+
+    return total;
+}
+
+//------------------------------------------------------------------------------
+static void
+usage(char ** argv) {
+    printf("%s [<options>]\n\n", argv[0]);
+    printf("    Options :\n");
+    
+    printf("        -compute <backend>\n");
+    printf("        Compute backend applied (");
+    for (int i=0; i < kBackendCount; ++i)
+        printf("%s ", g_BackendNames[i]);
+    printf(").\n");
+    
+    printf("        -help / -h\n");
+    printf("        Displays usage information.");
+      
+}
+
+//------------------------------------------------------------------------------
+static void 
+parseArgs(int argc, char ** argv) {
+
+    for (int i=1; i<argc; ++i) {
+        if (not strcmp(argv[i],"-compute")) {
+        
+            const char * backend = NULL;
+            
+            if (i<(argc-1))
+                backend = argv[++i];
+
+            if (not strcmp(backend, "all")) {
+              g_Backend = -1;
+            } else {
+              bool found = false;
+              for (int i = 0; i < kBackendCount; ++i) {
+                if (not strcmp(backend, g_BackendNames[i])) {
+                  g_Backend = i;
+                  found = true;
+                  break;
+                }
+              }
+              if (not found) {
+                printf("-compute : must be 'all' or one of: ");
+                for (int i = 0; i < kBackendCount; ++i)
+                    printf("%s ", g_BackendNames[i]);
+                printf("\n");
+                exit(0);
+              }
+            }
+        } else if ( (not strcmp(argv[i],"-help")) or
+                    (not strcmp(argv[i],"-h")) ) {
+            usage(argv);
+            exit(1);
+        } else {
+            usage(argv);
+            exit(0);
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+int 
+main(int argc, char ** argv) {
+
+    // Run with no args tests default (CPU) backend.
+    // "-backend all" tests all available backends.
+    // "-backend <name>" tests one backend.
+    parseArgs(argc, argv);
+
+    // Make sure we have an OpenGL context : create dummy GLFW window
+    if (not glfwInit()) {
+        printf("Failed to initialize GLFW\n");
+        return 1;
+    }
+
+    static const char windowTitle[] = "OpenSubdiv glViewer";
+    
+    int width=10, height=10;
+    
+#if GLFW_VERSION_MAJOR>=3
+    if (not (g_window=glfwCreateWindow(width, height, windowTitle, NULL, NULL))) {
+        printf("Failed to open window.\n");
+        glfwTerminate();
+        return 1;
+    }
+    glfwMakeContextCurrent(g_window);
+#else
+    if (glfwOpenWindow(width, height, 8, 8, 8, 8, 24, 8,GLFW_WINDOW) == GL_FALSE) {
+        printf("Failed to open window.\n");
+        glfwTerminate();
+        return 1;
+    }
+#endif
+    
+#if not defined(__APPLE__)
+    if (GLenum r = glewInit() != GLEW_OK) {
+        printf("Failed to initialize glew. error = %d\n", r);
+        exit(1);
+    }
+#endif
+
+    printf("precision : %f\n",PRECISION);
+
+    int levels=5, total=0;
+
+    if (g_Backend == -1) {
+        for (int i = 0; i < kBackendCount; ++i)
+            total += checkBackend (i, levels);
+    } else {
+        total += checkBackend (g_Backend, levels);
+    }
+
+    glfwTerminate();
 
     if (total==0)
       printf("All tests passed.\n");

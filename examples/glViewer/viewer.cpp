@@ -56,17 +56,24 @@
 //
 
 #if defined(__APPLE__)
-    #include <GLUT/glut.h>
+    #include <OpenGL/gl3.h>
+    #define GLFW_INCLUDE_GL3
+    #define GLFW_NO_GLU
 #else
     #include <stdlib.h>
     #include <GL/glew.h>
     #if defined(WIN32)
         #include <GL/wglew.h>
     #endif
-    #include <GL/glut.h>
 #endif
 
-#include "../../regression/common/mutex.h" // XXX
+#if defined(GLFW_VERSION_3)
+    #include <GL/glfw3.h>
+    GLFWwindow* g_window=0;
+    GLFWmonitor* g_primary=0;
+#else
+    #include <GL/glfw.h>
+#endif
 
 #include <osd/error.h>
 #include <osd/vertex.h>
@@ -77,10 +84,18 @@
 #include <osd/cpuGLVertexBuffer.h>
 #include <osd/cpuComputeContext.h>
 #include <osd/cpuComputeController.h>
+OpenSubdiv::OsdCpuComputeController *g_cpuComputeController = NULL;
 
 #ifdef OPENSUBDIV_HAS_OPENMP
     #include <osd/ompDispatcher.h>
     #include <osd/ompComputeController.h>
+    OpenSubdiv::OsdOmpComputeController *g_ompComputeController = NULL;
+#endif
+
+#ifdef OPENSUBDIV_HAS_GCD
+    #include <osd/gcdDispatcher.h>
+    #include <osd/gcdComputeController.h>
+    OpenSubdiv::OsdGcdComputeController *g_gcdComputeController = NULL;
 #endif
 
 #ifdef OPENSUBDIV_HAS_OPENCL
@@ -93,6 +108,7 @@
 
     cl_context g_clContext;
     cl_command_queue g_clQueue;
+    OpenSubdiv::OsdCLComputeController *g_clComputeController = NULL;
 #endif
 
 #ifdef OPENSUBDIV_HAS_CUDA
@@ -107,6 +123,7 @@
     #include "../common/cudaInit.h"
 
     bool g_cudaInitialized = false;
+    OpenSubdiv::OsdCudaComputeController *g_cudaComputeController = NULL;
 #endif
 
 #ifdef OPENSUBDIV_HAS_GLSL_TRANSFORM_FEEDBACK
@@ -114,6 +131,7 @@
     #include <osd/glslTransformFeedbackComputeContext.h>
     #include <osd/glslTransformFeedbackComputeController.h>
     #include <osd/glVertexBuffer.h>
+    OpenSubdiv::OsdGLSLTransformFeedbackComputeController *g_glslTransformFeedbackComputeController = NULL;
 #endif
 
 #ifdef OPENSUBDIV_HAS_GLSL_COMPUTE
@@ -121,6 +139,7 @@
     #include <osd/glslComputeContext.h>
     #include <osd/glslComputeController.h>
     #include <osd/glVertexBuffer.h>
+    OpenSubdiv::OsdGLSLComputeController *g_glslComputeController = NULL;
 #endif
 
 #include <osd/glMesh.h>
@@ -132,7 +151,11 @@ OpenSubdiv::OsdGLMeshInterface *g_mesh;
 #include "../common/gl_hud.h"
 
 static const char *shaderSource =
-#include "shader.inc"
+#if defined(GL_ARB_tessellation_shader) || defined(GL_VERSION_4_0)
+    #include "shader.inc"
+#else
+    #include "shader_gl3.inc"
+#endif
 ;
 
 #include <cfloat>
@@ -147,10 +170,11 @@ typedef OpenSubdiv::HbrHalfedge<OpenSubdiv::OsdVertex> OsdHbrHalfedge;
 
 enum KernelType { kCPU = 0,
                   kOPENMP = 1,
-                  kCUDA = 2,
-                  kCL = 3,
-                  kGLSL = 4,
-                  kGLSLCompute = 5 };
+                  kGCD = 2,
+                  kCUDA = 3,
+                  kCL = 4,
+                  kGLSL = 5,
+                  kGLSLCompute = 6 };
 
 struct SimpleShape {
     std::string  name;
@@ -170,25 +194,27 @@ int   g_frame = 0,
       g_repeatCount = 0;
 
 // GUI variables
-int   g_fullscreen=0,
+int   g_fullscreen = 0,
       g_freeze = 0,
       g_wire = 2,
-      g_adaptive = 1,
+      g_adaptive = 0,
       g_drawCageEdges = 1,
       g_drawCageVertices = 0,
       g_drawPatchCVs = 0,
       g_drawNormals = 0,
-      g_mbutton[3] = {0, 0, 0};
+      g_mbutton[3] = {0, 0, 0}, 
+      g_running = 1;
 
 int   g_displayPatchColor = 1;
 
 float g_rotate[2] = {0, 0},
-      g_prev_x = 0,
-      g_prev_y = 0,
       g_dolly = 5,
       g_pan[2] = {0, 0},
       g_center[3] = {0, 0, 0},
       g_size = 0;
+
+int   g_prev_x = 0,
+      g_prev_y = 0;
 
 int   g_width = 1024,
       g_height = 1024;
@@ -220,11 +246,31 @@ GLuint g_transformUB = 0,
        g_lightingUB = 0,
        g_lightingBinding = 0;
 
+struct Transform {
+    float ModelViewMatrix[16];
+    float ProjectionMatrix[16];
+    float ModelViewProjectionMatrix[16];
+} g_transformData;
+
 GLuint g_primQuery = 0;
+
+GLuint g_vao = 0;
+GLuint g_cageEdgeVAO = 0,
+       g_cageEdgeVBO = 0,
+       g_cageVertexVAO = 0,
+       g_cageVertexVBO = 0;
 
 std::vector<int> g_coarseEdges;
 std::vector<float> g_coarseEdgeSharpness;
 std::vector<float> g_coarseVertexSharpness;
+
+struct Program
+{
+    GLuint program;
+    GLuint uniformModelViewProjectionMatrix;
+    GLuint attrPosition;
+    GLuint attrColor;
+} g_defaultProgram;
 
 static void
 checkGLErrors(std::string const & where = "")
@@ -240,11 +286,78 @@ checkGLErrors(std::string const & where = "")
 }
 
 //------------------------------------------------------------------------------
+static GLuint
+compileShader(GLenum shaderType, const char *source)
+{
+    GLuint shader = glCreateShader(shaderType);
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
+    checkGLErrors("compileShader");
+    return shader;
+}
+
+static bool
+linkDefaultProgram()
+{
+#if defined(GL_ARB_tessellation_shader) || defined(GL_VERSION_4_0)
+    #define GLSL_VERSION_DEFINE "#version 400\n"
+#else
+    #define GLSL_VERSION_DEFINE "#version 150\n"
+#endif
+    
+    static const char *vsSrc =
+        GLSL_VERSION_DEFINE
+        "in vec3 position;\n"
+        "in vec3 color;\n"
+        "out vec4 fragColor;\n"
+        "uniform mat4 ModelViewProjectionMatrix;\n"
+        "void main() {\n"
+        "  fragColor = vec4(color, 1);\n"
+        "  gl_Position = ModelViewProjectionMatrix * "
+        "                  vec4(position, 1);\n"
+        "}\n";
+
+    static const char *fsSrc =
+        GLSL_VERSION_DEFINE
+        "in vec4 fragColor;\n"
+        "out vec4 color;\n"
+        "void main() {\n"
+        "  color = fragColor;\n"
+        "}\n";
+
+    GLuint program = glCreateProgram();
+    GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vsSrc);
+    GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fsSrc);
+
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+
+    glLinkProgram(program);
+
+    GLint status;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    if (status == GL_FALSE) {
+        GLint infoLogLength;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
+        char *infoLog = new char[infoLogLength];
+        glGetProgramInfoLog(program, infoLogLength, NULL, infoLog);
+        printf("%s\n", infoLog);
+        delete[] infoLog;
+        exit(1);
+    }
+
+    g_defaultProgram.program = program;
+    g_defaultProgram.uniformModelViewProjectionMatrix = 
+        glGetUniformLocation(program, "ModelViewProjectionMatrix");
+    g_defaultProgram.attrPosition = glGetAttribLocation(program, "position");
+    g_defaultProgram.attrColor = glGetAttribLocation(program, "color");
+
+    return true;
+}
+
+//------------------------------------------------------------------------------
 static void
 initializeShapes( ) {
-
-#include <shapes/bilinear_cube.h>
-    g_defaultShapes.push_back(SimpleShape(bilinear_cube, "bilinear_cube", kBilinear));
 
 #include <shapes/catmark_cube_corner0.h>
     g_defaultShapes.push_back(SimpleShape(catmark_cube_corner0, "catmark_cube_corner0", kCatmark));
@@ -294,6 +407,12 @@ initializeShapes( ) {
 #include <shapes/catmark_gregory_test4.h>
     g_defaultShapes.push_back(SimpleShape(catmark_gregory_test4, "catmark_gregory_test4", kCatmark));
 
+#include <shapes/catmark_hole_test1.h>
+    g_defaultShapes.push_back(SimpleShape(catmark_hole_test1, "catmark_hole_test1", kCatmark));
+
+#include <shapes/catmark_hole_test2.h>
+    g_defaultShapes.push_back(SimpleShape(catmark_hole_test2, "catmark_hole_test2", kCatmark));
+
 #include <shapes/catmark_pyramid_creases0.h>
     g_defaultShapes.push_back(SimpleShape(catmark_pyramid_creases0, "catmark_pyramid_creases0", kCatmark));
 
@@ -330,6 +449,8 @@ initializeShapes( ) {
 #include <shapes/catmark_square_hedit3.h>
     g_defaultShapes.push_back(SimpleShape(catmark_square_hedit3, "catmark_square_hedit3", kCatmark));
 
+#include <shapes/catmark_square_hedit4.h>
+    g_defaultShapes.push_back(SimpleShape(catmark_square_hedit4, "catmark_square_hedit4", kCatmark));
 
 
 #ifndef WIN32 // exceeds max string literal (65535 chars)
@@ -353,6 +474,9 @@ initializeShapes( ) {
     g_defaultShapes.push_back(SimpleShape(catmark_rook, "catmark_rook", kCatmark));
 #endif
 
+
+#include <shapes/bilinear_cube.h>
+    g_defaultShapes.push_back(SimpleShape(bilinear_cube, "bilinear_cube", kBilinear));
 
 
 #include <shapes/loop_cube_creases0.h>
@@ -472,6 +596,8 @@ getKernelName(int kernel) {
         return "CPU";
     else if (kernel == kOPENMP)
         return "OpenMP";
+    else if (kernel == kGCD)
+        return "GCD";
     else if (kernel == kCUDA)
         return "Cuda";
     else if (kernel == kGLSL)
@@ -487,6 +613,7 @@ getKernelName(int kernel) {
 static void
 createOsdMesh( const char * shape, int level, int kernel, Scheme scheme=kCatmark ) {
 
+    checkGLErrors("create osd enter");
     // generate Hbr representation from "obj" description
     OsdHbrMesh * hmesh = simpleHbr<OpenSubdiv::OsdVertex>(shape, scheme, g_orgPositions);
 
@@ -525,38 +652,80 @@ createOsdMesh( const char * shape, int level, int kernel, Scheme scheme=kCatmark
     bits.set(OpenSubdiv::MeshAdaptive, doAdaptive);
 
     if (kernel == kCPU) {
+        if (not g_cpuComputeController) {
+            g_cpuComputeController = new OpenSubdiv::OsdCpuComputeController();
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdCpuGLVertexBuffer,
                                          OpenSubdiv::OsdCpuComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_cpuComputeController,
+                                                hmesh, 6, level, bits);
 #ifdef OPENSUBDIV_HAS_OPENMP
     } else if (kernel == kOPENMP) {
+        if (not g_ompComputeController) {
+            g_ompComputeController = new OpenSubdiv::OsdOmpComputeController();
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdCpuGLVertexBuffer,
                                          OpenSubdiv::OsdOmpComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_ompComputeController,
+                                                hmesh, 6, level, bits);
+#endif
+#ifdef OPENSUBDIV_HAS_GCD
+    } else if (kernel == kGCD) {
+        if (not g_gcdComputeController) {
+            g_gcdComputeController = new OpenSubdiv::OsdGcdComputeController();
+        }
+        g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdCpuGLVertexBuffer,
+                                         OpenSubdiv::OsdGcdComputeController,
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_gcdComputeController,
+                                                hmesh, 6, level, bits);
 #endif
 #ifdef OPENSUBDIV_HAS_OPENCL
     } else if(kernel == kCL) {
+        if (not g_clComputeController) {
+            g_clComputeController = new OpenSubdiv::OsdCLComputeController(g_clContext, g_clQueue);
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdCLGLVertexBuffer,
                                          OpenSubdiv::OsdCLComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits, g_clContext, g_clQueue);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_clComputeController,
+                                                hmesh, 6, level, bits,
+                                                g_clContext, g_clQueue);
 #endif
 #ifdef OPENSUBDIV_HAS_CUDA
     } else if(kernel == kCUDA) {
+        if (not g_cudaComputeController) {
+            g_cudaComputeController = new OpenSubdiv::OsdCudaComputeController();
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdCudaGLVertexBuffer,
                                          OpenSubdiv::OsdCudaComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_cudaComputeController,
+                                                hmesh, 6, level, bits);
 #endif
 #ifdef OPENSUBDIV_HAS_GLSL_TRANSFORM_FEEDBACK
     } else if(kernel == kGLSL) {
+        if (not g_glslComputeController) {
+            g_glslTransformFeedbackComputeController = new OpenSubdiv::OsdGLSLTransformFeedbackComputeController();
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdGLVertexBuffer,
                                          OpenSubdiv::OsdGLSLTransformFeedbackComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_glslTransformFeedbackComputeController,
+                                                hmesh, 6, level, bits);
 #endif
 #ifdef OPENSUBDIV_HAS_GLSL_COMPUTE
     } else if(kernel == kGLSLCompute) {
+        if (not g_glslComputeController) {
+            g_glslComputeController = new OpenSubdiv::OsdGLSLComputeController();
+        }
         g_mesh = new OpenSubdiv::OsdMesh<OpenSubdiv::OsdGLVertexBuffer,
                                          OpenSubdiv::OsdGLSLComputeController,
-                                         OpenSubdiv::OsdGLDrawContext>(hmesh, 6, level, bits);
+                                         OpenSubdiv::OsdGLDrawContext>(
+                                                g_glslComputeController,
+                                                hmesh, 6, level, bits);
 #endif
     } else {
         printf("Unsupported kernel %s\n", getKernelName(kernel));
@@ -586,6 +755,19 @@ createOsdMesh( const char * shape, int level, int kernel, Scheme scheme=kCatmark
     g_tessLevel = std::max(g_tessLevel,g_tessLevelMin);
 
     updateGeom();
+
+    // -------- VAO 
+    glBindVertexArray(g_vao);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_mesh->GetDrawContext()->patchIndexBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, g_mesh->BindVertexBuffer());
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, 0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, (float*)12);
+
+    glBindVertexArray(0);
 }
 
 //------------------------------------------------------------------------------
@@ -636,42 +818,96 @@ drawNormals() {
 }
 
 static inline void
-setSharpnessColor(float s)
+setSharpnessColor(float s, float *r, float *g, float *b)
 {
     //  0.0       2.0       4.0
     // green --- yellow --- red
-    float r = std::min(1.0f, s * 0.5f);
-    float g = std::min(1.0f, 2.0f - s*0.5f);
-    glColor3f(r, g, 0.0f);
+    *r = std::min(1.0f, s * 0.5f);
+    *g = std::min(1.0f, 2.0f - s*0.5f);
+    *b = 0;
 }
 
 static void
 drawCageEdges() {
 
-    glDisable(GL_LIGHTING);
-    glLineWidth(2.0f);
-    glBegin(GL_LINES);
-    for(int i=0; i<(int)g_coarseEdges.size(); i+=2) {
-        setSharpnessColor(g_coarseEdgeSharpness[i/2]);
-        glVertex3fv(&g_positions[g_coarseEdges[i]*3]);
-        glVertex3fv(&g_positions[g_coarseEdges[i+1]*3]);
+    glUseProgram(g_defaultProgram.program);
+    glUniformMatrix4fv(g_defaultProgram.uniformModelViewProjectionMatrix,
+                       1, GL_FALSE, g_transformData.ModelViewProjectionMatrix);
+
+    std::vector<float> vbo;
+    vbo.reserve(g_coarseEdges.size() * 6);
+    float r, g, b;
+    for (int i = 0; i < (int)g_coarseEdges.size(); i+=2) {
+        setSharpnessColor(g_coarseEdgeSharpness[i/2], &r, &g, &b);
+        for (int j = 0; j < 2; ++j) {
+            vbo.push_back(g_positions[g_coarseEdges[i+j]*3]);
+            vbo.push_back(g_positions[g_coarseEdges[i+j]*3+1]);
+            vbo.push_back(g_positions[g_coarseEdges[i+j]*3+2]);
+            vbo.push_back(r);
+            vbo.push_back(g);
+            vbo.push_back(b);
+        }
     }
-    glEnd();
-    glLineWidth(1.0f);
+
+    glBindVertexArray(g_cageEdgeVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, g_cageEdgeVBO);
+    glBufferData(GL_ARRAY_BUFFER, (int)vbo.size() * sizeof(float), &vbo[0],
+                 GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(g_defaultProgram.attrPosition);
+    glEnableVertexAttribArray(g_defaultProgram.attrColor);
+    glVertexAttribPointer(g_defaultProgram.attrPosition,
+                          3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, 0);
+    glVertexAttribPointer(g_defaultProgram.attrColor,
+                          3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, (void*)12);
+
+    glDrawArrays(GL_LINES, 0, (int)g_coarseEdges.size());
+
+    glBindVertexArray(0);
+    glUseProgram(0);
 } 
 
 static void
 drawCageVertices() {
 
-    glDisable(GL_LIGHTING);
-    glPointSize(10.0f);
-    glBegin(GL_POINTS);
-    for(int i=0; i<(int)g_positions.size()/3; ++i) {
-        setSharpnessColor(g_coarseVertexSharpness[i]);
-        glVertex3fv(&g_positions[i*3]);
+    glUseProgram(g_defaultProgram.program);
+    glUniformMatrix4fv(g_defaultProgram.uniformModelViewProjectionMatrix,
+                       1, GL_FALSE, g_transformData.ModelViewProjectionMatrix);
+
+    int numPoints = (int)g_positions.size()/3;
+    std::vector<float> vbo;
+    vbo.reserve(numPoints*6);
+    float r, g, b;
+    for (int i = 0; i < numPoints; ++i) {
+        setSharpnessColor(g_coarseVertexSharpness[i], &r, &g, &b);
+        vbo.push_back(g_positions[i*3+0]);
+        vbo.push_back(g_positions[i*3+1]);
+        vbo.push_back(g_positions[i*3+2]);
+        vbo.push_back(r);
+        vbo.push_back(g);
+        vbo.push_back(b);
     }
-    glEnd();
+
+    glBindVertexArray(g_cageVertexVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, g_cageVertexVBO);
+    glBufferData(GL_ARRAY_BUFFER, (int)vbo.size() * sizeof(float), &vbo[0],
+                 GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(g_defaultProgram.attrPosition);
+    glEnableVertexAttribArray(g_defaultProgram.attrColor);
+    glVertexAttribPointer(g_defaultProgram.attrPosition,
+                          3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, 0);
+    glVertexAttribPointer(g_defaultProgram.attrColor,
+                          3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, (void*)12);
+
+    glPointSize(10.0f);
+    glDrawArrays(GL_POINTS, 0, numPoints);
     glPointSize(1.0f);
+
+    glBindVertexArray(0);
+    glUseProgram(0);
 }
 
 //------------------------------------------------------------------------------
@@ -708,6 +944,12 @@ EffectDrawRegistry::_CreateDrawSourceConfig(DescType const & desc)
 //    sconfig->commonShader.AddDefine("OSD_ENABLE_PATCH_CULL");
 //    sconfig->commonShader.AddDefine("OSD_ENABLE_SCREENSPACE_TESSELLATION");
 
+#if defined(GL_ARB_tessellation_shader) || defined(GL_VERSION_4_0)
+    const char *glslVersion = "#version 400\n";
+#else
+    const char *glslVersion = "#version 330\n";
+#endif
+
     if (desc.first.type != OpenSubdiv::kNonPatch) {
 
         if (effect == kQuadWire) effect = kTriWire;
@@ -717,17 +959,17 @@ EffectDrawRegistry::_CreateDrawSourceConfig(DescType const & desc)
 
     } else {
         sconfig->vertexShader.source = shaderSource;
-        sconfig->vertexShader.version = "#version 410\n";
+        sconfig->vertexShader.version = glslVersion;
         sconfig->vertexShader.AddDefine("VERTEX_SHADER");
     }
     assert(sconfig);
 
     sconfig->geometryShader.source = shaderSource;
-    sconfig->geometryShader.version = "#version 410\n";
+    sconfig->geometryShader.version = glslVersion;
     sconfig->geometryShader.AddDefine("GEOMETRY_SHADER");
 
     sconfig->fragmentShader.source = shaderSource;
-    sconfig->fragmentShader.version = "#version 410\n";
+    sconfig->fragmentShader.version = glslVersion;
     sconfig->fragmentShader.AddDefine("FRAGMENT_SHADER");
 
     switch (effect) {
@@ -784,23 +1026,40 @@ EffectDrawRegistry::_CreateDrawConfig(
     ConfigType * config = BaseRegistry::_CreateDrawConfig(desc.first, sconfig);
     assert(config);
 
+    GLuint uboIndex;
+
     // XXXdyu can use layout(binding=) with GLSL 4.20 and beyond
     g_transformBinding = 0;
-    glUniformBlockBinding(config->program,
-        glGetUniformBlockIndex(config->program, "Transform"),
-        g_transformBinding);
+    uboIndex = glGetUniformBlockIndex(config->program, "Transform");
+    if (uboIndex != GL_INVALID_INDEX)
+        glUniformBlockBinding(config->program, uboIndex, g_transformBinding);
 
     g_tessellationBinding = 1;
-    glUniformBlockBinding(config->program,
-        glGetUniformBlockIndex(config->program, "Tessellation"),
-        g_tessellationBinding);
+    uboIndex = glGetUniformBlockIndex(config->program, "Tessellation");
+    if (uboIndex != GL_INVALID_INDEX)
+        glUniformBlockBinding(config->program, uboIndex, g_tessellationBinding);
 
     g_lightingBinding = 2;
-    glUniformBlockBinding(config->program,
-        glGetUniformBlockIndex(config->program, "Lighting"),
-        g_lightingBinding);
+    uboIndex = glGetUniformBlockIndex(config->program, "Lighting");
+    if (uboIndex != GL_INVALID_INDEX)
+        glUniformBlockBinding(config->program, uboIndex, g_lightingBinding);
 
     GLint loc;
+#if not defined(GL_ARB_separate_shader_objects) || defined(GL_VERSION_4_1)
+    glUseProgram(config->program);
+    if ((loc = glGetUniformLocation(config->program, "g_VertexBuffer")) != -1) {
+        glUniform1i(loc, 0); // GL_TEXTURE0
+    }
+    if ((loc = glGetUniformLocation(config->program, "g_ValenceBuffer")) != -1) {
+        glUniform1i(loc, 1); // GL_TEXTURE1
+    }
+    if ((loc = glGetUniformLocation(config->program, "g_QuadOffsetBuffer")) != -1) {
+        glUniform1i(loc, 2); // GL_TEXTURE2
+    }
+    if ((loc = glGetUniformLocation(config->program, "g_patchLevelBuffer")) != -1) {
+        glUniform1i(loc, 3); // GL_TEXTURE3
+    }
+#else
     if ((loc = glGetUniformLocation(config->program, "g_VertexBuffer")) != -1) {
         glProgramUniform1i(config->program, loc, 0); // GL_TEXTURE0
     }
@@ -813,6 +1072,7 @@ EffectDrawRegistry::_CreateDrawConfig(
     if ((loc = glGetUniformLocation(config->program, "g_patchLevelBuffer")) != -1) {
         glProgramUniform1i(config->program, loc, 3); // GL_TEXTURE3
     }
+#endif
 
     return config;
 }
@@ -841,27 +1101,15 @@ bindProgram(Effect effect, OpenSubdiv::OsdPatchArray const & patch)
 
     glUseProgram(program);
 
-    // Update and bind transform state
-    struct Transform {
-        float ModelViewMatrix[16];
-        float ProjectionMatrix[16];
-        float ModelViewProjectionMatrix[16];
-    } transformData;
-    glGetFloatv(GL_MODELVIEW_MATRIX, transformData.ModelViewMatrix);
-    glGetFloatv(GL_PROJECTION_MATRIX, transformData.ProjectionMatrix);
-    multMatrix(transformData.ModelViewProjectionMatrix,
-               transformData.ModelViewMatrix,
-               transformData.ProjectionMatrix);
-
     if (! g_transformUB) {
         glGenBuffers(1, &g_transformUB);
         glBindBuffer(GL_UNIFORM_BUFFER, g_transformUB);
         glBufferData(GL_UNIFORM_BUFFER,
-                sizeof(transformData), NULL, GL_STATIC_DRAW);
+                sizeof(g_transformData), NULL, GL_STATIC_DRAW);
     };
     glBindBuffer(GL_UNIFORM_BUFFER, g_transformUB);
     glBufferSubData(GL_UNIFORM_BUFFER,
-                0, sizeof(transformData), &transformData);
+                0, sizeof(g_transformData), &g_transformData);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     glBindBufferBase(GL_UNIFORM_BUFFER, g_transformBinding, g_transformUB);
@@ -924,22 +1172,22 @@ bindProgram(Effect effect, OpenSubdiv::OsdPatchArray const & patch)
 
     if (g_mesh->GetDrawContext()->vertexTextureBuffer) {
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_BUFFER, 
+        glBindTexture(GL_TEXTURE_BUFFER,
             g_mesh->GetDrawContext()->vertexTextureBuffer);
     }
     if (g_mesh->GetDrawContext()->vertexValenceTextureBuffer) {
         glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_BUFFER, 
+        glBindTexture(GL_TEXTURE_BUFFER,
             g_mesh->GetDrawContext()->vertexValenceTextureBuffer);
     }
     if (g_mesh->GetDrawContext()->quadOffsetTextureBuffer) {
         glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_BUFFER, 
+        glBindTexture(GL_TEXTURE_BUFFER,
             g_mesh->GetDrawContext()->quadOffsetTextureBuffer);
     }
     if (g_mesh->GetDrawContext()->patchLevelTextureBuffer) {
         glActiveTexture(GL_TEXTURE3);
-        glBindTexture(GL_TEXTURE_BUFFER, 
+        glBindTexture(GL_TEXTURE_BUFFER,
             g_mesh->GetDrawContext()->patchLevelTextureBuffer);
     }
     glActiveTexture(GL_TEXTURE0);
@@ -957,45 +1205,28 @@ display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glViewport(0, 0, g_width, g_height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
 
-    glDisable(GL_LIGHTING);
-    glColor3f(1, 1, 1);
-    glBegin(GL_QUADS);
-    glColor3f(0.5f, 0.5f, 0.5f);
-    glVertex3f(-1, -1, 1);
-    glVertex3f( 1, -1, 1);
-    glColor3f(0, 0, 0);
-    glVertex3f( 1,  1, 1);
-    glVertex3f(-1,  1, 1);
-    glEnd();
-
+    // prepare view matrix
     double aspect = g_width/(double)g_height;
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluPerspective(45.0, aspect, 0.01, 500.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(-g_pan[0], -g_pan[1], -g_dolly);
-    glRotatef(g_rotate[1], 1, 0, 0);
-    glRotatef(g_rotate[0], 0, 1, 0);
-    glTranslatef(-g_center[0], -g_center[2], g_center[1]); // z-up model
-    glRotatef(-90, 1, 0, 0); // z-up model
-
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-    glBindBuffer(GL_ARRAY_BUFFER, g_mesh->BindVertexBuffer());
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, 0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, (float*)12);
+    identity(g_transformData.ModelViewMatrix);
+    translate(g_transformData.ModelViewMatrix, -g_pan[0], -g_pan[1], -g_dolly);
+    rotate(g_transformData.ModelViewMatrix, g_rotate[1], 1, 0, 0);
+    rotate(g_transformData.ModelViewMatrix, g_rotate[0], 0, 1, 0);
+    rotate(g_transformData.ModelViewMatrix, -90, 1, 0, 0);
+    translate(g_transformData.ModelViewMatrix,
+              -g_center[0], -g_center[1], -g_center[2]);
+    perspective(g_transformData.ProjectionMatrix,
+                45.0f, (float)aspect, 0.01f, 500.0f);
+    multMatrix(g_transformData.ModelViewProjectionMatrix,
+               g_transformData.ModelViewMatrix,
+               g_transformData.ProjectionMatrix);
+    
+    // make sure that the vertex buffer is interoped back as a GL resources.
+    g_mesh->BindVertexBuffer();
+    
+    glBindVertexArray(g_vao);
 
     OpenSubdiv::OsdPatchArrayVector const & patches = g_mesh->GetDrawContext()->patchArrays;
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_mesh->GetDrawContext()->patchIndexBuffer);
 
     // cv drawing
     if (g_drawPatchCVs) {
@@ -1029,11 +1260,11 @@ display() {
         int patchRotation = patch.desc.rotation;
 
         if (patch.desc.subpatch == 0) {
-            if (patchType == OpenSubdiv::kTransitionRegular) 
+            if (patchType == OpenSubdiv::kTransitionRegular)
                 transitionPatchTypeCount[0][patchPattern][patchRotation] += patch.numIndices / patch.patchSize;
-            else if (patchType == OpenSubdiv::kTransitionBoundary) 
+            else if (patchType == OpenSubdiv::kTransitionBoundary)
                 transitionPatchTypeCount[1][patchPattern][patchRotation] += patch.numIndices / patch.patchSize;
-            else if (patchType == OpenSubdiv::kTransitionBoundary) 
+            else if (patchType == OpenSubdiv::kTransitionBoundary)
                 transitionPatchTypeCount[2][patchPattern][patchRotation] += patch.numIndices / patch.patchSize;
             else
                 patchTypeCount[patchType] += patch.numIndices / patch.patchSize;
@@ -1042,9 +1273,10 @@ display() {
         GLenum primType;
 
         if (g_mesh->GetDrawContext()->IsAdaptive()) {
-
+#if defined(GL_ARB_tessellation_shader) || defined(GL_VERSION_4_0)
             primType = GL_PATCHES;
             glPatchParameteri(GL_PATCH_VERTICES, patch.patchSize);
+#endif
 
         } else {
             if (g_scheme == kLoop) {
@@ -1054,6 +1286,7 @@ display() {
             }
         }
 
+#if defined(GL_ARB_tessellation_shader) || defined(GL_VERSION_4_0)
         GLuint program = bindProgram(GetEffect(), patch);
 
         GLuint diffuseColor = glGetUniformLocation(program, "diffuseColor");
@@ -1107,7 +1340,10 @@ display() {
         } else {
             glProgramUniform4f(program, diffuseColor, 0.4f, 0.4f, 0.8f, 1);
         }
-            
+#else
+        bindProgram(GetEffect(), patch);
+#endif
+
         if (g_wire == 0) {
             glDisable(GL_CULL_FACE);
         }
@@ -1124,8 +1360,7 @@ display() {
     GLuint numPrimsGenerated = 0;
     glGetQueryObjectuiv(g_primQuery, GL_QUERY_RESULT, &numPrimsGenerated);
 
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
+    glBindVertexArray(0);
 
     glUseProgram(0);
 
@@ -1137,10 +1372,6 @@ display() {
 
     if (g_drawCageVertices)
         drawCageVertices();
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-    glDisableClientState(GL_VERTEX_ARRAY);
 
     s.Stop();
     float drawCpuTime = float(s.GetElapsed() * 1000.0f);
@@ -1195,12 +1426,10 @@ display() {
         g_hud.DrawString(10, -60,  "GPU Draw   : %.3f ms", drawGpuTime);
         g_hud.DrawString(10, -40,  "CPU Draw   : %.3f ms", drawCpuTime);
         g_hud.DrawString(10, -20,  "FPS        : %3.1f", fps);
+
+        g_hud.Flush();
     }
 
-    g_hud.Flush();
-
-    glFinish();
-    glutSwapBuffers();
     glFinish();
 
     checkGLErrors("display leave");
@@ -1208,63 +1437,98 @@ display() {
 
 //------------------------------------------------------------------------------
 static void
+#if GLFW_VERSION_MAJOR>=3
+motion(GLFWwindow *, int x, int y) {
+#else
 motion(int x, int y) {
+#endif
 
     if (g_mbutton[0] && !g_mbutton[1] && !g_mbutton[2]) {
         // orbit
         g_rotate[0] += x - g_prev_x;
         g_rotate[1] += y - g_prev_y;
-    } else if (!g_mbutton[0] && g_mbutton[1] && !g_mbutton[2]) {
+    } else if (!g_mbutton[0] && !g_mbutton[1] && g_mbutton[2]) {
         // pan
         g_pan[0] -= g_dolly*(x - g_prev_x)/g_width;
         g_pan[1] += g_dolly*(y - g_prev_y)/g_height;
-    } else if ((g_mbutton[0] && g_mbutton[1] && !g_mbutton[2]) or
-               (!g_mbutton[0] && !g_mbutton[1] && g_mbutton[2])) {
+    } else if ((g_mbutton[0] && !g_mbutton[1] && g_mbutton[2]) or
+               (!g_mbutton[0] && g_mbutton[1] && !g_mbutton[2])) {
         // dolly
         g_dolly -= g_dolly*0.01f*(x - g_prev_x);
         if(g_dolly <= 0.01) g_dolly = 0.01f;
     }
 
-    g_prev_x = float(x);
-    g_prev_y = float(y);
+    g_prev_x = x;
+    g_prev_y = y;
 }
 
 //------------------------------------------------------------------------------
 static void
-mouse(int button, int state, int x, int y) {
+#if GLFW_VERSION_MAJOR>=3
+mouse(GLFWwindow *, int button, int state) {
+#else
+mouse(int button, int state) {
+#endif
 
-    if (button == 0 && state == 1 && g_hud.MouseClick(x, y)) return;
+    if (button == 0 && state == GLFW_PRESS && g_hud.MouseClick(g_prev_x, g_prev_y))
+        return;
 
     if (button < 3) {
-        g_prev_x = float(x);
-        g_prev_y = float(y);
-        g_mbutton[button] = !state;
+        g_mbutton[button] = (state == GLFW_PRESS);
     }
 }
 
 //------------------------------------------------------------------------------
 static void
-quit() {
+uninitGL() {
 
     glDeleteQueries(1, &g_primQuery);
+
+    glDeleteBuffers(1, &g_cageVertexVBO);
+    glDeleteBuffers(1, &g_cageEdgeVBO);
+    glDeleteVertexArrays(1, &g_vao);
+    glDeleteVertexArrays(1, &g_cageVertexVAO);
+    glDeleteVertexArrays(1, &g_cageEdgeVAO);
 
     if (g_mesh)
         delete g_mesh;
 
-#ifdef OPENSUBDIV_HAS_CUDA
-    cudaDeviceReset();
+    delete g_cpuComputeController;
+
+#ifdef OPENSUBDIV_HAS_OPENMP
+    delete g_ompComputeController;
+#endif
+
+#ifdef OPENSUBDIV_HAS_GCD
+    delete g_gcdComputeController;
 #endif
 
 #ifdef OPENSUBDIV_HAS_OPENCL
+    delete g_clComputeController;
     uninitCL(g_clContext, g_clQueue);
 #endif
 
-    exit(0);
+#ifdef OPENSUBDIV_HAS_CUDA
+    delete g_cudaComputeController;
+    cudaDeviceReset();
+#endif
+
+#ifdef OPENSUBDIV_HAS_GLSL_TRANSFORM_FEEDBACK
+    delete g_glslTransformFeedbackComputeController;
+#endif
+
+#ifdef OPENSUBDIV_HAS_GLSL_COMPUTE
+    delete g_glslComputeController;
+#endif
 }
 
 //------------------------------------------------------------------------------
 static void
+#if GLFW_VERSION_MAJOR>=3
+reshape(GLFWwindow *, int width, int height) {
+#else
 reshape(int width, int height) {
+#endif
 
     g_width = width;
     g_height = height;
@@ -1273,43 +1537,40 @@ reshape(int width, int height) {
 }
 
 //------------------------------------------------------------------------------
-static void toggleFullScreen() {
+#if GLFW_VERSION_MAJOR>=3
+int windowClose(GLFWwindow*) {
+#else
+int windowClose() {
+#endif
+    g_running = false;
+    return GL_TRUE;
+}
 
-    static int x,y,w,h;
-    
-    g_fullscreen = !g_fullscreen;
-    
-    if (g_fullscreen) {
-        x = glutGet((GLenum)GLUT_WINDOW_X);
-        y = glutGet((GLenum)GLUT_WINDOW_Y);
-        w = glutGet((GLenum)GLUT_WINDOW_WIDTH);
-        h = glutGet((GLenum)GLUT_WINDOW_HEIGHT);
-        
-        glutFullScreen( );
-        
-        reshape( glutGet(GLUT_SCREEN_WIDTH),
-                 glutGet(GLUT_SCREEN_HEIGHT) );
-    } else {
-        glutReshapeWindow(w, h);
-        glutPositionWindow(x,y);
-        reshape( w, h );
-    }
+//------------------------------------------------------------------------------
+static void 
+toggleFullScreen() {
+    // XXXX manuelk : to re-implement from glut
 }
 
 //------------------------------------------------------------------------------
 static void
-keyboard(unsigned char key, int x, int y) {
+#if GLFW_VERSION_MAJOR>=3
+keyboard(GLFWwindow *, int key, int event) {
+#else
+keyboard(int key, int event) {
+#endif
 
-    if (g_hud.KeyDown(key)) return;
+    if (event == GLFW_RELEASE) return;
+    if (g_hud.KeyDown(tolower(key))) return;
 
     switch (key) {
-        case 'q': quit();
-        case 'f': fitFrame(); break;
-        case '\t': toggleFullScreen(); break;
+        case 'Q': g_running = 0; break;
+        case 'F': fitFrame(); break;
+        case GLFW_KEY_TAB: toggleFullScreen(); break;
         case '+':
         case '=':  g_tessLevel++; break;
         case '-':  g_tessLevel = std::max(g_tessLevelMin, g_tessLevel-1); break;
-        case 0x1b: g_hud.SetVisible(!g_hud.IsVisible()); break;
+        case GLFW_KEY_ESC: g_hud.SetVisible(!g_hud.IsVisible()); break;
     }
 }
 
@@ -1385,9 +1646,11 @@ callbackFreeze(bool checked, int f)
 static void
 callbackAdaptive(bool checked, int a)
 {
-    g_adaptive = checked;
+    if (OpenSubdiv::OsdGLDrawContext::SupportsAdaptiveTessellation()) {
+        g_adaptive = checked;
 
-    createOsdMesh( g_defaultShapes[g_currentShape].data, g_level, g_kernel, g_defaultShapes[ g_currentShape ].scheme );
+        createOsdMesh( g_defaultShapes[g_currentShape].data, g_level, g_kernel, g_defaultShapes[ g_currentShape ].scheme );
+    }
 }
 
 static void
@@ -1423,6 +1686,9 @@ initHUD()
 #ifdef OPENSUBDIV_HAS_OPENMP
     g_hud.AddRadioButton(0, "OPENMP", false, 10, 30, callbackKernel, kOPENMP, 'k');
 #endif
+#ifdef OPENSUBDIV_HAS_GCD
+    g_hud.AddRadioButton(0, "GCD", false, 10, 30, callbackKernel, kGCD, 'k');
+#endif
 #ifdef OPENSUBDIV_HAS_CUDA
     g_hud.AddRadioButton(0, "CUDA",   false, 10, 50, callbackKernel, kCUDA, 'k');
 #endif
@@ -1451,7 +1717,8 @@ initHUD()
     g_hud.AddCheckBox("Patch Color (P)",   true, 350, 110, callbackDisplayPatchColor, 0, 'p');
     g_hud.AddCheckBox("Freeze (spc)", false, 350, 130, callbackFreeze, 0, ' ');
 
-    g_hud.AddCheckBox("Adaptive (`)", true, 10, 150, callbackAdaptive, 0, '`');
+    if (OpenSubdiv::OsdGLDrawContext::SupportsAdaptiveTessellation())
+        g_hud.AddCheckBox("Adaptive (`)", g_adaptive!=0, 10, 150, callbackAdaptive, 0, '`');
 
     for (int i = 1; i < 11; ++i) {
         char level[16];
@@ -1459,11 +1726,9 @@ initHUD()
         g_hud.AddRadioButton(3, level, i==2, 10, 170+i*20, callbackLevel, i, '0'+(i%10));
     }
 
-    for(int i = 0; i < (int)g_defaultShapes.size(); ++i){
+    for (int i = 0; i < (int)g_defaultShapes.size(); ++i) {
         g_hud.AddRadioButton(4, g_defaultShapes[i].name.c_str(), i==0, -220, 10+i*16, callbackModel, i, 'n');
     }
-
-    callbackModel(g_currentShape);
 }
 
 //------------------------------------------------------------------------------
@@ -1477,6 +1742,12 @@ initGL()
     glEnable(GL_CULL_FACE);
 
     glGenQueries(1, &g_primQuery);
+
+    glGenVertexArrays(1, &g_vao);
+    glGenVertexArrays(1, &g_cageVertexVAO);
+    glGenVertexArrays(1, &g_cageEdgeVAO);
+    glGenBuffers(1, &g_cageVertexVBO);
+    glGenBuffers(1, &g_cageEdgeVBO);
 }
 
 //------------------------------------------------------------------------------
@@ -1487,10 +1758,9 @@ idle() {
         g_frame++;
 
     updateGeom();
-    glutPostRedisplay();
 
     if (g_repeatCount != 0 and g_frame >= g_repeatCount)
-        quit();
+        g_running = 0;
 }
 
 //------------------------------------------------------------------------------
@@ -1498,28 +1768,43 @@ static void
 callbackError(OpenSubdiv::OsdErrorType err, const char *message)
 {
     printf("OsdError: %d\n", err);
-    printf(message);
+    printf("%s", message);
+}
+
+//------------------------------------------------------------------------------
+static void
+setGLCoreProfile()
+{
+#if GLFW_VERSION_MAJOR>=3
+    #define glfwOpenWindowHint glfwWindowHint
+    #define GLFW_OPENGL_VERSION_MAJOR GLFW_CONTEXT_VERSION_MAJOR
+    #define GLFW_OPENGL_VERSION_MINOR GLFW_CONTEXT_VERSION_MINOR
+#endif
+
+    glfwOpenWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if not defined(__APPLE__)
+    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MAJOR, 4);
+    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MINOR, 2);
+    glfwOpenWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#else
+    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MAJOR, 3);
+    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MINOR, 2);
+#endif
+    
 }
 
 //------------------------------------------------------------------------------
 int main(int argc, char ** argv)
 {
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_RGBA |GLUT_DOUBLE | GLUT_DEPTH);
-    glutInitWindowSize(g_width, g_height);
-    glutCreateWindow("OpenSubdiv glutViewer");
-    glutDisplayFunc(display);
-    glutReshapeFunc(reshape);
-    glutMouseFunc(mouse);
-    glutKeyboardFunc(keyboard);
-    glutMotionFunc(motion);
-
+    bool fullscreen = false;
     std::string str;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d"))
             g_level = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-c"))
             g_repeatCount = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-f"))
+            fullscreen = true;
         else {
             std::ifstream ifs(argv[1]);
             if (ifs) {
@@ -1532,23 +1817,112 @@ int main(int argc, char ** argv)
         }
     }
     initializeShapes();
-
     OsdSetErrorCallback(callbackError);
 
-    glewInit();
+    if (not glfwInit()) {
+        printf("Failed to initialize GLFW\n");
+        return 1;
+    }
 
-    initGL();
-
-#ifdef WIN32
-    wglSwapIntervalEXT(0);
+    static const char windowTitle[] = "OpenSubdiv glViewer";
+    
+#define CORE_PROFILE
+#ifdef CORE_PROFILE
+    setGLCoreProfile();
 #endif
 
+#if GLFW_VERSION_MAJOR>=3
+    if (fullscreen) {
+    
+        g_primary = glfwGetPrimaryMonitor();
+
+        // apparently glfwGetPrimaryMonitor fails under linux : if no primary,
+        // settle for the first one in the list    
+        if (not g_primary) {
+            int count=0;
+            GLFWmonitor ** monitors = glfwGetMonitors(&count);
+
+            if (count)
+                g_primary = monitors[0];
+        }
+        
+        if (g_primary) {
+            GLFWvidmode vidmode = glfwGetVideoMode(g_primary);
+            g_width = vidmode.width;
+            g_height = vidmode.height;
+        }
+    }
+
+    if (not (g_window=glfwCreateWindow(g_width, g_height, windowTitle, 
+                                       fullscreen and g_primary ? g_primary : NULL, NULL))) {
+        printf("Failed to open window.\n");
+        glfwTerminate();
+        return 1;
+    }
+    glfwMakeContextCurrent(g_window);
+    glfwSetKeyCallback(g_window, keyboard);
+    glfwSetCursorPosCallback(g_window, motion);
+    glfwSetMouseButtonCallback(g_window, mouse);
+    glfwSetWindowSizeCallback(g_window, reshape);
+    glfwSetWindowCloseCallback(g_window, windowClose);
+#else
+    if (glfwOpenWindow(g_width, g_height, 8, 8, 8, 8, 24, 8,
+                       fullscreen ? GLFW_FULLSCREEN : GLFW_WINDOW) == GL_FALSE) {
+        printf("Failed to open window.\n");
+        glfwTerminate();
+        return 1;
+    }
+    glfwSetWindowTitle(windowTitle);
+    glfwSetKeyCallback(keyboard);
+    glfwSetMousePosCallback(motion);
+    glfwSetMouseButtonCallback(mouse);
+    glfwSetWindowSizeCallback(reshape);
+    glfwSetWindowCloseCallback(windowClose);
+#endif
+
+
+#if not defined(__APPLE__)
+#ifdef CORE_PROFILE
+    // this is the only way to initialize glew correctly under core profile context.
+    glewExperimental = true;
+#endif
+    if (GLenum r = glewInit() != GLEW_OK) {
+        printf("Failed to initialize glew. Error = %s\n", glewGetErrorString(r));
+        exit(1);
+    }
+#ifdef CORE_PROFILE
+    // clear GL errors which was generated during glewInit()
+    glGetError();
+#endif
+#endif
+
+    // activate feature adaptive tessellation if OSD supports it
+    g_adaptive = OpenSubdiv::OsdGLDrawContext::SupportsAdaptiveTessellation();
+
+    initGL();
+    linkDefaultProgram();
+
+    glfwSwapInterval(0);
+
     initHUD();
+    callbackModel(g_currentShape);
 
-    glutIdleFunc(idle);
-    glutMainLoop();
+    while (g_running) {
+        idle();
+        display();
+        
+#if GLFW_VERSION_MAJOR>=3
+        glfwPollEvents();
+        glfwSwapBuffers(g_window);
+#else
+        glfwSwapBuffers();
+#endif
+        
+        glFinish();
+    }
 
-    quit();
+    uninitGL();
+    glfwTerminate();
 }
 
 //------------------------------------------------------------------------------

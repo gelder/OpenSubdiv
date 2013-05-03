@@ -86,6 +86,21 @@ if (WIN32)
             /usr/local/lib
             /usr/X11R6/lib
             DOC "The Ptex library")
+elseif (APPLE)
+    find_path( PTEX_INCLUDE_DIR
+        NAMES
+            Ptexture.h
+        PATHS
+            ${PTEX_LOCATION}/include
+            $ENV{PTEX_LOCATION}/include
+            DOC "The directory where Ptexture.h resides")
+    find_library( PTEX_LIBRARY
+        NAMES
+            libPtex.a
+        PATHS
+            ${PTEX_LOCATION}/lib
+            $ENV{PTEX_LOCATION}/lib
+            DOC "The Ptex Library")
 else ()
     find_path( PTEX_INCLUDE_DIR
         NAMES
@@ -115,11 +130,29 @@ else ()
             DOC "The Ptex library")
 endif ()
 
+if (PTEX_INCLUDE_DIR AND EXISTS "${PTEX_INCLUDE_DIR}/Ptexture.h" )
+
+    file(STRINGS "${PTEX_INCLUDE_DIR}/Ptexture.h" TMP REGEX "^#define PtexAPIVersion.*$")
+    string(REGEX MATCHALL "[0-9]+" API ${TMP})
+    
+    file(STRINGS "${PTEX_INCLUDE_DIR}/Ptexture.h" TMP REGEX "^#define PtexFileMajorVersion.*$")
+    string(REGEX MATCHALL "[0-9]+" MAJOR ${TMP})
+
+    file(STRINGS "${PTEX_INCLUDE_DIR}/Ptexture.h" TMP REGEX "^#define PtexFileMinorVersion.*$")
+    string(REGEX MATCHALL "[0-9]+" MINOR ${TMP})
+
+    set(PTEX_VERSION ${API}.${MAJOR}.${MINOR})
+
+endif()
+
 include(FindPackageHandleStandardArgs)
 
-find_package_handle_standard_args(PTEX DEFAULT_MSG
-    PTEX_INCLUDE_DIR
-    PTEX_LIBRARY
+find_package_handle_standard_args(PTex 
+    REQUIRED_VARS
+        PTEX_INCLUDE_DIR
+        PTEX_LIBRARY
+    VERSION_VAR
+        PTEX_VERSION
 )
 
 mark_as_advanced(

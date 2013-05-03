@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 #
 #     Copyright (C) Pixar. All rights reserved.
 #
@@ -55,64 +58,85 @@
 #     a particular purpose and non-infringement.
 #
 
-# *** glutViewer ***
+from PyQt4 import QtGui, QtCore
+from window import Window
+from renderer import Renderer
+import sys
+import numpy as np
+import osd
 
-set(SHADER_FILES
-     shader.glsl
-)
+def main():
 
-set(PLATFORM_LIBRARIES
-    ${OSD_LINK_TARGET}
-    ${OPENGL_LIBRARY}
-    ${GLEW_LIBRARY}
-    ${GLUT_LIBRARIES}
-)
+    app = QtGui.QApplication(sys.argv)
+    renderer = Renderer()
+    win = Window(renderer)
+    win.raise_()
 
-include_directories(
-    ${PROJECT_SOURCE_DIR}/opensubdiv
-    ${PROJECT_SOURCE_DIR}/regression
-    ${GLEW_INCLUDE_DIR}
-    ${GLUT_INCLUDE_DIR}
-)
+    verts = [ 0.0, -1.414214, 1.0,  # 0
+              1.414214, 0.0, 1.0,   # 1
+              -1.414214, 0.0, 1.0,  # 2
+              0.0, 1.414214, 1.0,   # 3
+              -1.414214, 0.0, -1.0, # 4
+              0.0, 1.414214, -1.0,  # 5
+              0.0, -1.414214, -1.0, # 6
+              1.414214, 0.0, -1.0 ] # 7
 
-#-------------------------------------------------------------------------------
-# Shader Stringification
-# We want to use preprocessor include directives to include GLSL and OpenCL
-# shader source files in cpp files, but since the sources contain newline
-# characters we would need raw string literals from C++11 to do this directly.
-# To avoid depending on C++11 we instead use a small tool called "line_quote"
-# to generate source files that are suitable for direct inclusion.
-foreach(shader_file ${SHADER_FILES})
+    verts = np.array(verts, np.float32).reshape((-1, 3))
 
-    string(REGEX REPLACE ".*[.](.*)" "\\1" extension ${shader_file})
+    faces = [ (0,1,3,2),  # 0
+              (2,3,5,4),  # 1
+              (4,5,7,6),  # 2
+              (6,7,1,0),  # 3
+              (1,7,5,3),  # 4
+              (6,0,2,4) ] # 5
 
-    string(REGEX REPLACE "(.*)[.].*" "\\1.inc" inc_file ${shader_file})
-    list(APPEND INC_FILES ${inc_file})
+    topo = osd.Topology(faces)
+    topo.boundaryMode = osd.BoundaryMode.EDGE_ONLY
+    for v in (2, 3, 4, 5):
+        topo.vertices[v].sharpness = 2.0
+    for e in xrange(4):
+        topo.faces[3].edges[e].sharpness = 3
+    topo.finalize()
 
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${inc_file}
-        COMMAND stringify ${CMAKE_CURRENT_SOURCE_DIR}/${shader_file}
-            ${CMAKE_CURRENT_SOURCE_DIR}/${inc_file}
-        DEPENDS stringify ${CMAKE_CURRENT_SOURCE_DIR}/${shader_file}
-    )
-endforeach()
+    subdivider = osd.Subdivider(
+        topo,
+        vertexLayout = 'f4, f4, f4',
+        indexType = np.uint32,
+        levels = 4)
+    subdivider.setCoarseVertices(verts)
+    subdivider.refine()
+    inds = subdivider.getRefinedQuads()
+    renderer.updateIndicesVbo(inds)
 
-if(APPLE)
-_add_glut_executable(glutViewer
-    viewer_compat.cpp
-)
-else()
-_add_glut_executable(glutViewer
-    viewer.cpp
-    ../common/font_image.cpp
-    ../common/hud.cpp
-    ../common/gl_hud.cpp
-    ${SHADER_FILES}
-    ${INC_FILES}
-)
-endif()
+    def animateVerts():
+        from time import time
+        import math
+        t = 4 * time()
+        t = 0
+        t = 0.5 + 0.5 * math.sin(t)
+        t = 0.25 + t * 0.75
+        a = np.array([ 0.0, -1.414214, 1.0])
+        b = np.array([ 1.414214, 0.0, 1.0])
+        c = np.array([ 0.0, -1.414214, -1.0])
+        d = np.array([1.414214, 0.0, -1.0 ])
+        center = (a + b + c + d) / 4
+        center = np.multiply(center, 1-t)
+        verts[0] = center + np.multiply(a, t)
+        verts[1] = center + np.multiply(b, t)
+        verts[6] = center + np.multiply(c, t)
+        verts[7] = center + np.multiply(d, t)
 
-target_link_libraries(glutViewer
-    ${PLATFORM_LIBRARIES}
-)
+    def updateAnimation():
+        animateVerts()
+        subdivider.setCoarseVertices(verts)
+        subdivider.refine()
+        pts = subdivider.getRefinedVertices()
+        renderer.updatePointsVbo(pts)
+    
+    updateAnimation()
+    renderer.drawHook = updateAnimation
+    retcode = app.exec_()
+    sys.exit(retcode)
 
+if __name__ == '__main__':
+    main()

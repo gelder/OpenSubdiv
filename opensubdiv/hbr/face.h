@@ -206,12 +206,14 @@ public:
     // Subdivide the face into a vertex if needed and return
     HbrVertex<T>* Subdivide();
 
+    bool HasChildVertex() const { return vchild!=-1; }
+
     // Remove the reference to subdivided vertex
     void RemoveChild() { vchild = -1; }
 
     // "Hole" flags used by subdivision to drop faces
     bool IsHole() const { return hole; }
-    void SetHole() { hole = 1; }
+    void SetHole(bool h=1) { hole = h; }
 
     // Coarse faces are the top level faces of a mesh. This will be
     // set by mesh->Finish()
@@ -489,7 +491,7 @@ HbrFace<T>::Initialize(HbrMesh<T>* m, HbrFace<T>* _parent, int childindex, int f
     stitchEdges = 0;
 #endif
     editOffset = -1;
-    depth = _depth;
+    depth = static_cast<unsigned char>(_depth);
     hole = 0;
     coarse = 0;
     protect = 0;

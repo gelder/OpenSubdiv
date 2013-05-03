@@ -59,7 +59,7 @@ add_subdirectory(hbr_regression)
 
 add_subdirectory(far_regression)
 
-if( OPENGL_FOUND AND GLEW_FOUND AND GLUT_FOUND)
+if(OPENGL_FOUND AND (GLEW_FOUND OR APPLE) AND GLFW_FOUND)
     add_subdirectory(osd_regression)
 else()
     set(MISSING "")
@@ -72,15 +72,15 @@ else()
         list(APPEND MISSING glew)
     endif()
 
-    if (NOT GLUT_FOUND)
-        list(APPEND MISSING glut)
+    if (NOT GLFW_FOUND)
+        list(APPEND MISSING glfw)
     endif()
 
     message(WARNING
         "The following libraries could not be found : ${MISSING}.  "
         "The osd regression test will not be available.  "
         "If you have these libraries installed, please specify their "
-        "path to cmake (through the GLEW_LOCATION and GLUT_LOCATION "
+        "path to cmake (through the GLEW_LOCATION and GLFW_LOCATION "
         "command line arguments or environment variables)."
     )
 endif()

@@ -17,12 +17,35 @@
 //
 #if defined(__APPLE__)
     #include <OpenGL/gl3.h>
+<<<<<<< HEAD
 #else
     #include <stdlib.h>
     #include <GL/glew.h>
     #include <GL/glut.h>
 #endif
 
+=======
+    #define GLFW_INCLUDE_GL3
+    #define GLFW_NO_GLU
+#else
+    #include <stdlib.h>
+    #include <GL/glew.h>
+    #if defined(WIN32)
+        #include <GL/wglew.h>
+    #endif
+#endif
+
+#if defined(GLFW_VERSION_3)
+    #include <GL/glfw3.h>
+    GLFWwindow* g_window=0;
+    GLFWmonitor* g_primary=0;
+#else
+    #include <GL/glfw.h>
+#endif
+
+
+
+>>>>>>> main-line/master
 #include "algebra.h"
 
 #include <iostream>

@@ -55,6 +55,13 @@
 //     a particular purpose and non-infringement.
 //
 
+layout(std140) uniform Transform {
+    mat4 ModelViewMatrix;
+    mat4 ProjectionMatrix;
+    mat4 ModelViewProjectionMatrix;
+    mat4 ModelViewInverseMatrix;
+};
+
 //--------------------------------------------------------------
 // Vertex Shader
 //--------------------------------------------------------------
@@ -63,14 +70,13 @@
 layout (location=0) in vec4 position;
 layout (location=1) in vec3 normal;
 
-out block {
-    OutputVertex v;
-} output;
+out vec4 vPosition;
+out vec3 vNormal;
 
 void main()
 {
-    output.v.position = ModelViewMatrix * position;
-    output.v.normal = (ModelViewMatrix * vec4(normal, 0.0)).xyz;
+    vPosition = ModelViewMatrix * position;
+    vNormal = (ModelViewMatrix * vec4(normal, 0.0)).xyz;
 }
 
 #endif
@@ -88,9 +94,8 @@ void main()
 
     #define EDGE_VERTS 4
 
-    in block {
-        OutputVertex v;
-    } input[4];
+    in vec4 vPosition[4];
+    in vec3 vNormal[4];
 
 #endif // PRIM_QUAD
 
@@ -102,9 +107,8 @@ void main()
 
     #define EDGE_VERTS 3
 
-    in block {
-        OutputVertex v;
-    } input[3];
+    in vec4 vPosition[3];
+    in vec3 vNormal[3];
 
 #endif // PRIM_TRI
 
@@ -113,25 +117,24 @@ void main()
     layout(points) in;
     layout(points, max_vertices = 1) out;
 
-    in block {
-        OutputVertex v;
-    } input[1];
+    in vec4 vPosition[1];
+    in vec3 vNormal[1];
 
 #endif // PRIM_POINT
 
-out block {
-    OutputVertex v;
-} output;
+out vec4 gPosition;
+out vec3 gNormal;
+noperspective out vec4 gEdgeDistance;
 
 void emit(int index, vec3 normal)
 {
-    output.v.position = input[index].v.position;
+    gPosition = vPosition[index];
 #ifdef SMOOTH_NORMALS
-    output.v.normal = input[index].v.normal;
+    gNormal = vNormal[index];
 #else
-    output.v.normal = normal;
+    gNormal = normal;
 #endif
-    gl_Position = ProjectionMatrix * input[index].v.position;
+    gl_Position = ProjectionMatrix * vPosition[index];
     EmitVertex();
 }
 
@@ -147,18 +150,18 @@ float edgeDistance(vec4 p, vec4 p0, vec4 p1)
 
 void emit(int index, vec3 normal, vec4 edgeVerts[EDGE_VERTS])
 {
-    output.v.edgeDistance[0] =
+    gEdgeDistance[0] =
         edgeDistance(edgeVerts[index], edgeVerts[0], edgeVerts[1]);
-    output.v.edgeDistance[1] =
+    gEdgeDistance[1] =
         edgeDistance(edgeVerts[index], edgeVerts[1], edgeVerts[2]);
 #ifdef PRIM_TRI
-    output.v.edgeDistance[2] =
+    gEdgeDistance[2] =
         edgeDistance(edgeVerts[index], edgeVerts[2], edgeVerts[0]);
 #endif
 #ifdef PRIM_QUAD
-    output.v.edgeDistance[2] =
+    gEdgeDistance[2] =
         edgeDistance(edgeVerts[index], edgeVerts[2], edgeVerts[3]);
-    output.v.edgeDistance[3] =
+    gEdgeDistance[3] =
         edgeDistance(edgeVerts[index], edgeVerts[3], edgeVerts[0]);
 #endif
 
@@ -175,17 +178,17 @@ void main()
 #endif
     
 #ifdef PRIM_QUAD
-    vec3 A = (input[0].v.position - input[1].v.position).xyz;
-    vec3 B = (input[3].v.position - input[1].v.position).xyz;
-    vec3 C = (input[2].v.position - input[1].v.position).xyz;
+    vec3 A = (vPosition[0] - vPosition[1]).xyz;
+    vec3 B = (vPosition[3] - vPosition[1]).xyz;
+    vec3 C = (vPosition[2] - vPosition[1]).xyz;
     vec3 n0 = normalize(cross(B, A));
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
     vec4 edgeVerts[EDGE_VERTS];
-    edgeVerts[0] = ProjectionMatrix * input[0].v.position;
-    edgeVerts[1] = ProjectionMatrix * input[1].v.position;
-    edgeVerts[2] = ProjectionMatrix * input[2].v.position;
-    edgeVerts[3] = ProjectionMatrix * input[3].v.position;
+    edgeVerts[0] = ProjectionMatrix * vPosition[0];
+    edgeVerts[1] = ProjectionMatrix * vPosition[1];
+    edgeVerts[2] = ProjectionMatrix * vPosition[2];
+    edgeVerts[3] = ProjectionMatrix * vPosition[3];
 
     edgeVerts[0].xy /= edgeVerts[0].w;
     edgeVerts[1].xy /= edgeVerts[1].w;
@@ -205,15 +208,15 @@ void main()
 #endif // PRIM_QUAD
 
 #ifdef PRIM_TRI
-    vec3 A = (input[1].v.position - input[0].v.position).xyz;
-    vec3 B = (input[2].v.position - input[0].v.position).xyz;
+    vec3 A = (vPosition[1] - vPosition[0]).xyz;
+    vec3 B = (vPosition[2] - vPosition[0]).xyz;
     vec3 n0 = normalize(cross(B, A));
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
     vec4 edgeVerts[EDGE_VERTS];
-    edgeVerts[0] = ProjectionMatrix * input[0].v.position;
-    edgeVerts[1] = ProjectionMatrix * input[1].v.position;
-    edgeVerts[2] = ProjectionMatrix * input[2].v.position;
+    edgeVerts[0] = ProjectionMatrix * vPosition[0];
+    edgeVerts[1] = ProjectionMatrix * vPosition[1];
+    edgeVerts[2] = ProjectionMatrix * vPosition[2];
 
     edgeVerts[0].xy /= edgeVerts[0].w;
     edgeVerts[1].xy /= edgeVerts[1].w;
@@ -239,9 +242,11 @@ void main()
 //--------------------------------------------------------------
 #ifdef FRAGMENT_SHADER
 
-in block {
-    OutputVertex v;
-} input;
+in vec4 gPosition;
+in vec3 gNormal;
+noperspective in vec4 gEdgeDistance;
+
+out vec4 outColor;
 
 #define NUM_LIGHTS 2
 
@@ -291,7 +296,7 @@ uniform vec4 fragColor;
 void
 main()
 {
-    gl_FragColor = fragColor;
+    outColor = fragColor;
 }
 #endif
 
@@ -301,12 +306,12 @@ edgeColor(vec4 Cfill, vec4 edgeDistance)
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
 #ifdef PRIM_TRI
     float d =
-        min(input.v.edgeDistance[0], min(input.v.edgeDistance[1], input.v.edgeDistance[2]));
+        min(gEdgeDistance[0], min(gEdgeDistance[1], gEdgeDistance[2]));
 #endif
 #ifdef PRIM_QUAD
     float d =
-        min(min(input.v.edgeDistance[0], input.v.edgeDistance[1]),
-            min(input.v.edgeDistance[2], input.v.edgeDistance[3]));
+        min(min(gEdgeDistance[0], gEdgeDistance[1]),
+            min(gEdgeDistance[2], gEdgeDistance[3]));
 #endif
     vec4 Cedge = vec4(1.0, 1.0, 0.0, 1.0);
     float p = exp2(-2 * d * d);
@@ -324,14 +329,14 @@ edgeColor(vec4 Cfill, vec4 edgeDistance)
 void
 main()
 {
-    vec3 N = (gl_FrontFacing ? input.v.normal : -input.v.normal);
-    vec4 Cf = lighting(input.v.position.xyz, N);
+    vec3 N = (gl_FrontFacing ? gNormal : -gNormal);
+    vec4 Cf = lighting(gPosition.xyz, N);
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
-    Cf = edgeColor(Cf, input.v.edgeDistance);
+    Cf = edgeColor(Cf, gEdgeDistance);
 #endif
 
-    gl_FragColor = Cf;
+    outColor = Cf;
 }
 #endif
 

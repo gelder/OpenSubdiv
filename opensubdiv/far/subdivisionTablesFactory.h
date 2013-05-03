@@ -136,6 +136,9 @@ protected:
                                                _vertVertsList;
 private:
 
+    // Returns the subdivision level of a vertex
+    static int getVertexDepth(HbrVertex<T> * v);
+
     template <class Type> static int sumList( std::vector<std::vector<Type> > const & list, int level );
 
     // Sums the number of adjacent vertices required to interpolate a Vert-Vertex 
@@ -173,10 +176,7 @@ FarSubdivisionTablesFactory<T,U>::FarSubdivisionTablesFactory( HbrMesh<T> const 
         HbrVertex<T> * v = mesh->GetVertex(i);
         assert(v);
 
-        if (not v->IsConnected())
-            continue;
-
-        int depth = v->GetFace()->GetDepth();
+        int depth = getVertexDepth( v );
 
         if (depth>maxlevel)
             continue;
@@ -223,15 +223,12 @@ FarSubdivisionTablesFactory<T,U>::FarSubdivisionTablesFactory( HbrMesh<T> const 
         HbrVertex<T> * v = mesh->GetVertex(i);
         assert(v);
 
-        if (not v->IsConnected())
-            continue;
-
-        int depth = v->GetFace()->GetDepth();
+        int depth = getVertexDepth( v );
 
         if (depth>maxlevel)
             continue;
 
-        assert( remapTable[ v->GetID() ] = -1 );
+        assert( remapTable[ v->GetID() ] == -1 );
 
         if (depth==0) {
             _vertVertsList[ depth ].push_back( v );
@@ -262,6 +259,22 @@ FarSubdivisionTablesFactory<T,U>::FarSubdivisionTablesFactory( HbrMesh<T> const 
             remapTable[ _vertVertsList[l][i]->GetID() ]=_vertVertIdx[l]+(int)i;
 
 
+}
+
+
+template <class T, class U> int 
+FarSubdivisionTablesFactory<T,U>::getVertexDepth(HbrVertex<T> * v) {
+
+    if (v->IsConnected()) {
+        return v->GetFace()->GetDepth();
+    } else {
+        // Un-connected vertices do not have a face pointer, so we have to seek
+        // the parent. Note : subdivision tables can only work with face-vertices,
+        // so we assert out of the other types.
+        HbrFace<T> * parent = v->GetParentFace();
+        assert(parent);
+        return parent->GetDepth()+1;
+    }
 }
 
 template <class T, class U>

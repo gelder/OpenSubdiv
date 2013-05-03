@@ -348,6 +348,8 @@ in block {
     OutputVertex v;
 } input;
 
+out vec4 outColor;
+
 uniform int ptexFaceOffset;
 
 #ifdef USE_PTEX_COLOR
@@ -528,7 +530,7 @@ main()
     if (overrideColorEnable) {
         texColor = overrideColor;
         vec4 Cf = texColor * lighting(input.v.position.xyz, normal);
-        gl_FragColor = edgeColor(Cf, input.v.edgeDistance);
+        outColor = edgeColor(Cf, input.v.edgeDistance);
         return;
     }
 
@@ -570,7 +572,7 @@ main()
     vec4 Cf = texColor * lighting(input.v.position.xyz, normal);
 #endif
 
-    gl_FragColor = edgeColor(Cf, input.v.edgeDistance);
+    outColor = edgeColor(Cf, input.v.edgeDistance);
 }
 
 #endif

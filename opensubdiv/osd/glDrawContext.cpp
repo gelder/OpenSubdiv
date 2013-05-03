@@ -92,6 +92,19 @@ OsdGLDrawContext::~OsdGLDrawContext()
 }
 
 bool
+OsdGLDrawContext::SupportsAdaptiveTessellation()
+{
+// Compile-time check of GL version
+#if (defined(GL_ARB_tessellation_shader) or defined(GL_VERSION_4_0)) and defined(GLEW_VERSION_4_0)
+    // Run-time check of GL version with GLEW
+    if (GLEW_VERSION_4_0) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+bool
 OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
                            GLuint vbo,
                            int numElements,
@@ -175,8 +188,9 @@ OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
 
             glBindTexture(GL_TEXTURE_BUFFER, ptexCoordinateTextureBuffer);
             glTexBuffer(GL_TEXTURE_BUFFER, GL_RG32I, ptexCoordinateBuffer);
-            glDeleteBuffers(1, &ptexCoordinateBuffer);
             glBindTexture(GL_TEXTURE_BUFFER, 0);
+            glDeleteBuffers(1, &ptexCoordinateBuffer);
+
 #endif
         }
 
@@ -221,14 +235,14 @@ OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
         patchTables->GetFullGregoryPatches().GetSize()/patchTables->GetGregoryPatchRingsize() +
         patchTables->GetFullBoundaryGregoryPatches().GetSize()/patchTables->GetGregoryPatchRingsize();
 
-    for (int p=0; p<5; ++p) {
+    for (unsigned char p=0; p<5; ++p) {
         totalPatchIndices +=
             patchTables->GetTransitionRegularPatches(p).GetSize();
 
         totalPatchLevels +=
             patchTables->GetTransitionRegularPatches(p).GetSize()/patchTables->GetRegularPatchRingsize();
 
-        for (int r=0; r<4; ++r) {
+        for (unsigned char r=0; r<4; ++r) {
             totalPatchIndices +=
                 patchTables->GetTransitionBoundaryPatches(p, r).GetSize() +
                 patchTables->GetTransitionCornerPatches(p, r).GetSize();
@@ -309,7 +323,8 @@ OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
                         patchTables->GetFullGregoryFVarData(),
                         farMesh->GetTotalFVarWidth(),
                         OsdPatchDescriptor(kGregory, 0, 0,
-                                           maxValence, numElements), 0);
+                                           static_cast<unsigned char>(maxValence), static_cast<unsigned char>(numElements)),
+                        0);
     _AppendPatchArray(&indexBase, &levelBase,
                         patchTables->GetFullBoundaryGregoryPatches(),
                         patchTables->GetGregoryPatchRingsize(),
@@ -317,10 +332,10 @@ OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
                         patchTables->GetFullBoundaryGregoryFVarData(),
                         farMesh->GetTotalFVarWidth(),
                         OsdPatchDescriptor(kBoundaryGregory, 0, 0,
-                                           maxValence, numElements),
+                                           static_cast<unsigned char>(maxValence), static_cast<unsigned char>(numElements)),
                         (int)patchTables->GetFullGregoryPatches().GetSize());
 
-    for (int p=0; p<5; ++p) {
+    for (unsigned char p=0; p<5; ++p) {
         _AppendPatchArray(&indexBase, &levelBase,
                         patchTables->GetTransitionRegularPatches(p),
                         patchTables->GetRegularPatchRingsize(),
@@ -328,7 +343,7 @@ OsdGLDrawContext::allocate(FarMesh<OsdVertex> *farMesh,
                         patchTables->GetTransitionRegularFVarData(p),
                         farMesh->GetTotalFVarWidth(),
                         OsdPatchDescriptor(kTransitionRegular, p, 0, 0, 0), 0);
-        for (int r=0; r<4; ++r) {
+        for (unsigned char r=0; r<4; ++r) {
             _AppendPatchArray(&indexBase, &levelBase,
                         patchTables->GetTransitionBoundaryPatches(p, r),
                         patchTables->GetBoundaryPatchRingsize(),
@@ -468,7 +483,7 @@ OsdGLDrawContext::_AppendPatchArray(
     for (int i = 0; i < (int) ptable.GetMarkers().size()-1; ++i) {
         int numPrims = ptable.GetNumElements(i)/array.patchSize;
         for (int j = 0; j < numPrims; ++j) {
-            levels.push_back(i);
+            levels.push_back(static_cast<unsigned char>(i));
         }
     }
 
