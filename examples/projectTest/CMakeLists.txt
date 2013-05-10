@@ -55,51 +55,33 @@
 #     a particular purpose and non-infringement.
 #
 
-if( OPENGL_FOUND AND (GLEW_FOUND AND GLFW_FOUND) OR (APPLE AND GLFW_FOUND))
-    add_subdirectory(glViewer)
-    add_subdirectory(glBatchViewer)
-    add_subdirectory(simpleCpu)
-    add_subdirectory(projectTest)
-    add_subdirectory(limitEval)
-    add_subdirectory(paintTest)
-    if(PTEX_FOUND AND (NOT APPLE))
-        # the ptexViewer example requires GL functionality not available on OSX
-        add_subdirectory(ptexViewer)
-    endif()
-else()
-    set(MISSING "")
+# *** glViewer ***
 
-    if (NOT OPENGL_FOUND)
-        list(APPEND MISSING OpenGL)
-    endif()
+set(PLATFORM_LIBRARIES
+    ${OSD_LINK_TARGET}
+    ${GLEW_LIBRARY}
+    ${GLFW_LIBRARIES}
+)
 
-    if (NOT GLEW_FOUND)
-        list(APPEND MISSING glew)
-    endif()
+include_directories(
+    ${PROJECT_SOURCE_DIR}/opensubdiv
+    ${PROJECT_SOURCE_DIR}/regression
+    ${GLEW_INCLUDE_DIR}
+    ${GLFW_INCLUDE_DIR}
+)
 
-    if (NOT GLFW_FOUND)
-        list(APPEND MISSING glfw)
-    endif()
+add_executable(projectTest
+    main.cpp
+    shape.h
+    shape.cpp
+    ../common/font_image.cpp
+    ../common/hud.cpp
+    ../common/gl_hud.cpp
+    ${INC_FILES}
+)
 
-    message(WARNING
-        "The following libraries could not be found : ${MISSING}.  "
-        "The glViewer and ptexViewer examples will not be available.  "
-        "If you have these libraries installed, please specify their "
-        "path to cmake (through the GLEW_LOCATION and GLFW_LOCATION "
-        "command line arguments or environment variables)."
-    )
-endif()
+target_link_libraries(projectTest
+    ${PLATFORM_LIBRARIES}
+)
 
-if(DXSDK_FOUND)
-   add_subdirectory(dxViewer)
-endif()
-
-# XXXX manuelk : turning off the maya plugin examples for now
-if(MAYA_FOUND AND (NOT APPLE))
-    add_subdirectory(mayaViewer)
-    if(PTEX_FOUND)
-        add_subdirectory(mayaPtexViewer)
-    endif()
-endif()
-
-add_subdirectory(mutex)
+install(TARGETS projectTest DESTINATION ${CMAKE_BINDIR_BASE})
