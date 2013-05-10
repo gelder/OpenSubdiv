@@ -58,6 +58,14 @@
 
 #include "shape.h"
 
+#include <hbr/bilinear.h>
+#include <hbr/loop.h>
+#include <hbr/catmark.h>
+#include <hbr/vertexEdit.h>
+#include <hbr/cornerEdit.h>
+#include <hbr/holeEdit.h>
+
+
 //------------------------------------------------------------------------------
 template <class T> std::string   
 hbrToObj( OpenSubdiv::HbrMesh<T> * mesh ) {
@@ -89,25 +97,6 @@ hbrToObj( OpenSubdiv::HbrMesh<T> * mesh ) {
     sh << "\n";
 
     return sh.str();
-}
-
-//------------------------------------------------------------------------------
-template <class T> OpenSubdiv::HbrMesh<T> *
-createMesh( Scheme scheme=kCatmark) {
-
-  OpenSubdiv::HbrMesh<T> * mesh = 0;
-
-  static OpenSubdiv::HbrBilinearSubdivision<T> _bilinear;
-  static OpenSubdiv::HbrLoopSubdivision<T>     _loop;
-  static OpenSubdiv::HbrCatmarkSubdivision<T>  _catmark;
-
-  switch (scheme) {
-    case kBilinear : mesh = new OpenSubdiv::HbrMesh<T>( &_bilinear ); break;
-    case kLoop     : mesh = new OpenSubdiv::HbrMesh<T>( &_loop     ); break;
-    case kCatmark  : mesh = new OpenSubdiv::HbrMesh<T>( &_catmark  ); break;
-  }
-
-  return mesh;
 }
 
 //------------------------------------------------------------------------------
@@ -173,61 +162,6 @@ copyVertexPositions( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, 
 //------------------------------------------------------------------------------
 template <class T> void
 createTopology( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, Scheme scheme) {
-
-    const int * fv=&(sh->faceverts[0]);
-    for(int f=0, ptxidx=0;f<sh->getNfaces(); f++ ) {
-
-        int nv = sh->nvertsPerFace[f];
-
-        if ((scheme==kLoop) and (nv!=3)) {
-            printf("Trying to create a Loop surbd with non-triangle face\n");
-            exit(1);
-        }
-
-        for(int j=0;j<nv;j++) {
-            OpenSubdiv::HbrVertex<T> * origin      = mesh->GetVertex( fv[j] );
-            OpenSubdiv::HbrVertex<T> * destination = mesh->GetVertex( fv[ (j+1)%nv] );
-            OpenSubdiv::HbrHalfedge<T> * opposite  = destination->GetEdge(origin);
-
-            if(origin==NULL || destination==NULL) {
-                printf(" An edge was specified that connected a nonexistent vertex\n");
-                exit(1);
-            }
-
-            if(origin == destination) {
-                printf(" An edge was specified that connected a vertex to itself\n");
-                exit(1);
-            }
-
-            if(opposite && opposite->GetOpposite() ) {
-                printf(" A non-manifold edge incident to more than 2 faces was found\n");
-                exit(1);
-            }
-
-            if(origin->GetEdge(destination)) {
-                printf(" An edge connecting two vertices was specified more than once."
-                       " It's likely that an incident face was flipped\n");
-                exit(1);
-            }
-        }
-
-        OpenSubdiv::HbrFace<T> * face = mesh->NewFace(nv, (int *)fv, 0);
-
-        face->SetPtexIndex(ptxidx);
-
-        if ( (scheme==kCatmark or scheme==kBilinear) and nv != 4 )
-            ptxidx+=nv;
-        else
-            ptxidx++;
-
-        fv+=nv;
-    }
-
-    mesh->SetInterpolateBoundaryMethod( OpenSubdiv::HbrMesh<T>::k_InterpolateBoundaryEdgeOnly );
-
-    applyTags( mesh, sh );
-
-    mesh->Finish();
 }
 
 //------------------------------------------------------------------------------
@@ -276,10 +210,49 @@ simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> & verts) {
 // mesh topology
 OpenSubdivShape(const std::vector<float>  &verts,
                 const std::vector<int>    &nvertsPerFace,
-                const std::vector<int>    &faceverts)
+                const std::vector<int>    &faceverts):
+    _verts[verts],
+    _nvertsPerFace[nvertsPerFace],
+    _faceverts[faceverts]
 {
 
 
+}
+
+OpenSubdivShape(const float* points,
+                int pointsLen /*= # of 3-float points*/, 
+                const int *nvertsPerFace, int numFaces,
+                const int *faceverts, int facevertsLen)
+{
+    _verts.resize(pointsLen*3);
+    for (int i=0; i<pointsLen*3; ++i) {
+        _verts[i]= points[i];
+    }
+    
+    _nvertsPerFace.resize(numFaces);
+    int totalNumFaceVerts=0;
+    for (int i=0; i<numFaces; ++i) {
+        _nvertsPerFace[i] = nvertsPerFace[i];
+        totalNumFaceVerts += nvertsPerFace[i];
+    }
+
+    if (totalNumFaceVerts != facevertsLen) {
+        // XXX real error needed
+        printf("Bad mesh passed to OpenSubdivShape\n");
+        _verts.clear();
+        _nvertsPerFace.clear();
+        return;
+    }
+
+    int badIndices=0;
+    for (int i=0; i<facevertsLen) {
+        if (faceverts[i] >= pointsLen) {
+            badIndices++;
+            _faceverts[i] = 0;
+        } else {
+            _faceverts[i] = faceverts[i];
+        }
+    }
 }
     
 
@@ -287,7 +260,101 @@ OpenSubdivShape(const std::vector<float>  &verts,
 OpenSubdivShape::~OpenSubdivShape() {
     for (int i=0; i<(int)tags.size(); ++i)
         delete tags[i];
+
+    if (_hbrMesh)
+        delete _hbrMesh;
 }
+
+
+OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>*
+OpenSubdivShape::GetHbrMesh()
+{
+
+    if (_hbrMesh) {
+        return _hbrMesh;
+    }
+
+    _hbrMesh = CreateMesh();
+    
+    const int * fv=&(_faceverts[0]);
+    for(int f=0, ptxidx=0;f< GetNfaces(); f++ ) {
+
+        int nv = _nvertsPerFace[f];
+
+        if ((scheme==kLoop) and (nv!=3)) {
+            printf("Trying to create a Loop surbd with non-triangle face\n");
+            exit(1);
+        }
+
+        for(int j=0;j<nv;j++) {
+            OpenSubdiv::HbrVertex<T> * origin      = _hbrMesh->GetVertex( fv[j] );
+            OpenSubdiv::HbrVertex<T> * destination = _hbrMesh->GetVertex( fv[ (j+1)%nv] );
+            OpenSubdiv::HbrHalfedge<T> * opposite  = destination->GetEdge(origin);
+
+            if(origin==NULL || destination==NULL) {
+                printf(" An edge was specified that connected a nonexistent vertex\n");
+                exit(1);
+            }
+
+            if(origin == destination) {
+                printf(" An edge was specified that connected a vertex to itself\n");
+                exit(1);
+            }
+
+            if(opposite && opposite->GetOpposite() ) {
+                printf(" A non-manifold edge incident to more than 2 faces was found\n");
+                exit(1);
+            }
+
+            if(origin->GetEdge(destination)) {
+                printf(" An edge connecting two vertices was specified more than once."
+                       " It's likely that an incident face was flipped\n");
+                exit(1);
+            }
+        }
+
+        OpenSubdiv::HbrFace<T> * face = _hbrMesh->NewFace(nv, (int *)fv, 0);
+
+        face->SetPtexIndex(ptxidx);
+
+        if ( (scheme==kCatmark or scheme==kBilinear) and nv != 4 )
+            ptxidx+=nv;
+        else
+            ptxidx++;
+
+        fv+=nv;
+    }
+
+    _hbrMesh->SetInterpolateBoundaryMethod( OpenSubdiv::HbrMesh<T>::k_InterpolateBoundaryEdgeOnly );
+
+    applyTags( _hbrMesh, sh );
+    
+    _hbrMesh->Finish();
+    
+    return _hbrMesh;
+}
+
+
+//------------------------------------------------------------------------------
+OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>*
+OpenSubdivShape::CreateMesh(OpenSubdiv::Scheme scheme)
+{       
+    OpenSubdiv::HbrMesh<T> * mesh = 0;
+
+    static OpenSubdiv::HbrBilinearSubdivision<T> _bilinear;
+    static OpenSubdiv::HbrLoopSubdivision<T>     _loop;
+    static OpenSubdiv::HbrCatmarkSubdivision<T>  _catmark;
+
+    switch (scheme) {
+    case kBilinear : mesh = new OpenSubdiv::HbrMesh<T>( &_bilinear ); break;
+    case kLoop     : mesh = new OpenSubdiv::HbrMesh<T>( &_loop     ); break;
+    case kCatmark  : mesh = new OpenSubdiv::HbrMesh<T>( &_catmark  ); break;
+    }
+
+    return mesh;
+}
+
+
 
 //------------------------------------------------------------------------------
 std::string OpenSubdivShape::genRIB() const {

@@ -86,7 +86,8 @@
 #include <osd/mesh.h>
 #include <osd/vertex.h>
 
-#include <common/shape_utils.h>
+#include "shape.h"
+
 #include "../common/stopwatch.h"
 #include "../common/simple_math.h"
 #include "../common/gl_hud.h"
@@ -346,8 +347,32 @@ updateGeom() {
 
 //------------------------------------------------------------------------------
 static void
-createOsdMesh( const std::string &shape, int level, Scheme scheme=kCatmark ) {
+createOsdMesh(int level)
+{
+    float points[] = { 0.000000, -1.414214, 1.000000,
+                       1.414214, 0.000000, 1.000000,    
+                       -1.414214, 0.000000, 1.000000,
+                       0.000000, 1.414214, 1.000000,
+                       -1.414214, 0.000000, -1.000000,
+                       0.000000, 1.414214, -1.000000,
+                       0.000000, -1.414214, -1.000000,
+                       1.414214, 0.000000, -1.000000};
 
+    int nvertsPerFace[] = { 4, 4, 4, 4, 4, 4};
+
+    int faceverts[] = { 1, 2, 4, 3,
+                        3, 4, 6, 5,
+                        5, 6, 8, 7,
+                        7, 8, 2, 1,
+                        2, 8, 6, 4,
+                        7, 1, 3, 5};
+    
+    Scheme scheme = kCatmark;
+
+    
+    OpenSubdivShape shape(points, sizeof(points)/(3*sizeof(float)),
+                          nvertsPerFace, sizeof(nvertsPerFace)/sizeof(int),
+                          faceverts, sizeof(faceverts)/sizeof(int));
     // Create HBR mesh
     OsdHbrMesh * hmesh = simpleHbr<OsdVertex>(shape.c_str(), scheme, g_orgPositions);
 
@@ -775,7 +800,7 @@ setSamples(bool add)
 
     g_nsamples = std::max(0, g_nsamples);
     
-    createOsdMesh( g_defaultShapes[g_currentShape].data, g_level, g_defaultShapes[ g_currentShape ].scheme );
+    createOsdMesh( g_level);
 }
 
 //------------------------------------------------------------------------------
@@ -820,7 +845,7 @@ callbackModel(int m)
 
     g_currentShape = m;
 
-    createOsdMesh( g_defaultShapes[m].data, g_level, g_defaultShapes[ g_currentShape ].scheme );
+    createOsdMesh( g_level);
 }
 
 //------------------------------------------------------------------------------
@@ -828,7 +853,7 @@ static void
 callbackLevel(int l)
 {
     g_level = l;
-    createOsdMesh( g_defaultShapes[g_currentShape].data, g_level, g_defaultShapes[ g_currentShape ].scheme );
+    createOsdMesh( g_leval);
 }
 
 //------------------------------------------------------------------------------

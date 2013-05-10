@@ -59,12 +59,6 @@
 #define OSD_SHAPE_H
 
 #include <hbr/mesh.h>
-#include <hbr/bilinear.h>
-#include <hbr/loop.h>
-#include <hbr/catmark.h>
-#include <hbr/vertexEdit.h>
-#include <hbr/cornerEdit.h>
-#include <hbr/holeEdit.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -105,6 +99,7 @@ enum Scheme {
 
 class OpenSubdivShape {
 
+  public:
     struct tag {
 
         static tag * parseTag( char const * stream );
@@ -119,22 +114,34 @@ class OpenSubdivShape {
 
     // The simplest constructor, only point positions and polygonal
     // mesh topology
-    OpenSubdivShape(const std::vector<float>  &verts,
+    OpenSubdivShape(const std::vector<float>  &points,
                     const std::vector<int>    &nvertsPerFace,
                     const std::vector<int>    &faceverts);
-    
+
+    // Constructor using raw types.
+    //
+    OpenSubdivShape(const float* points,
+                    int pointsLen /*= # of 3-float points*/, 
+                    const int *nvertsPerFace, int numFaces,
+                    const int *faceverts, int facevertsLen);
+
     std::string genRIB() const;
 
     ~OpenSubdivShape();
 
-    int getNverts() const { return (int)_verts.size()/3; }
+    // Return the hbr mesh, allocating and filling it if needed
+    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> *GetHbrMesh();
+    
+    int GetNverts() const { return (int)_verts.size()/3; }
 
-    int getNfaces() const { return (int)_nvertsPerFace.size(); }
+    int GetNfaces() const { return (int)_nvertsPerFace.size(); }
 
     
     
   private:
 
+    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *CreateMesh(
+        OpenSubdiv::Scheme scheme = kCatmark);
     
     std::vector<float>  _verts;
     std::vector<float>  _uvs;
@@ -150,7 +157,7 @@ class OpenSubdivShape {
     // Initialized to NULL, only allocated if feature adaptive refinement
     // is required, not if subdivision/patch tables are loaded.
     //
-    HbrMesh<OsdVertex>  *_hbrMesh;
+    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *_hbrMesh;
     
 };
 
