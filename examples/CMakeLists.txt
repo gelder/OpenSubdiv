@@ -61,7 +61,10 @@ if( OPENGL_FOUND AND (GLEW_FOUND AND GLFW_FOUND) OR (APPLE AND GLFW_FOUND))
     add_subdirectory(simpleCpu)
     add_subdirectory(projectTest)
     add_subdirectory(limitEval)
-    add_subdirectory(paintTest)
+    if(NOT APPLE)
+        # the paintTest example requires GL functionality not available on OSX
+        add_subdirectory(paintTest)
+    endif()
     if(PTEX_FOUND AND (NOT APPLE))
         # the ptexViewer example requires GL functionality not available on OSX
         add_subdirectory(ptexViewer)
@@ -101,5 +104,3 @@ if(MAYA_FOUND AND (NOT APPLE))
         add_subdirectory(mayaPtexViewer)
     endif()
 endif()
-
-add_subdirectory(mutex)

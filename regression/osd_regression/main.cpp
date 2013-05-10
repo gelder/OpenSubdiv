@@ -79,8 +79,6 @@
 #include <stdio.h>
 #include <cassert>
 
-#include "../common/mutex.h"
-
 #include <far/meshFactory.h>
 
 #include <osd/vertex.h>
@@ -746,11 +744,10 @@ main(int argc, char ** argv) {
         return 1;
     }
 
-    static const char windowTitle[] = "OpenSubdiv glViewer";
-    
     int width=10, height=10;
     
 #if GLFW_VERSION_MAJOR>=3
+    static const char windowTitle[] = "OpenSubdiv OSD regression";
     if (not (g_window=glfwCreateWindow(width, height, windowTitle, NULL, NULL))) {
         printf("Failed to open window.\n");
         glfwTerminate();

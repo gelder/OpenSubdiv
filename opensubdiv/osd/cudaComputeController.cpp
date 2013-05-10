@@ -57,7 +57,6 @@
 
 #include "../osd/cudaComputeContext.h"
 #include "../osd/cudaComputeController.h"
-#include "../osd/table.h"
 
 #include <cuda_runtime.h>
 #include <string.h>
@@ -122,8 +121,8 @@ OsdCudaComputeController::ApplyBilinearFaceVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * F_IT = context->GetTable(Table::F_IT);
-    const OsdCudaTable * F_ITa = context->GetTable(Table::F_ITa);
+    const OsdCudaTable * F_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::F_IT);
+    const OsdCudaTable * F_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::F_ITa);
     assert(F_IT);
     assert(F_ITa);
 
@@ -134,7 +133,7 @@ OsdCudaComputeController::ApplyBilinearFaceVerticesKernel(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(F_IT->GetCudaMemory()),
         static_cast<int*>(F_ITa->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -145,7 +144,7 @@ OsdCudaComputeController::ApplyBilinearEdgeVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * E_IT = context->GetTable(Table::E_IT);
+    const OsdCudaTable * E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT);
     assert(E_IT);
 
     OsdCudaComputeBilinearEdge(
@@ -154,7 +153,7 @@ OsdCudaComputeController::ApplyBilinearEdgeVerticesKernel(
         context->GetCurrentVertexNumElements()-3,
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(E_IT->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -165,7 +164,7 @@ OsdCudaComputeController::ApplyBilinearVertexVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
     assert(V_ITa);
 
     OsdCudaComputeBilinearVertex(
@@ -174,7 +173,7 @@ OsdCudaComputeController::ApplyBilinearVertexVerticesKernel(
         context->GetCurrentVertexNumElements()-3,
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(V_ITa->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -185,8 +184,8 @@ OsdCudaComputeController::ApplyCatmarkFaceVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * F_IT = context->GetTable(Table::F_IT);
-    const OsdCudaTable * F_ITa = context->GetTable(Table::F_ITa);
+    const OsdCudaTable * F_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::F_IT);
+    const OsdCudaTable * F_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::F_ITa);
     assert(F_IT);
     assert(F_ITa);
 
@@ -197,7 +196,7 @@ OsdCudaComputeController::ApplyCatmarkFaceVerticesKernel(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(F_IT->GetCudaMemory()),
         static_cast<int*>(F_ITa->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -208,8 +207,8 @@ OsdCudaComputeController::ApplyCatmarkEdgeVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * E_IT = context->GetTable(Table::E_IT);
-    const OsdCudaTable * E_W = context->GetTable(Table::E_W);
+    const OsdCudaTable * E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT);
+    const OsdCudaTable * E_W = context->GetTable(FarSubdivisionTables<OsdVertex>::E_W);
     assert(E_IT);
     assert(E_W);
 
@@ -220,7 +219,7 @@ OsdCudaComputeController::ApplyCatmarkEdgeVerticesKernel(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(E_IT->GetCudaMemory()),
         static_cast<float*>(E_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -231,9 +230,9 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelB(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_IT = context->GetTable(Table::V_IT);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::V_IT);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_IT);
     assert(V_W);
@@ -246,7 +245,7 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelB(
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<int*>(V_IT->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -257,8 +256,8 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelA1(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_W);
 
@@ -269,7 +268,7 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelA1(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, false);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), false);
 }
 
 void
@@ -280,8 +279,8 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelA2(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_W);
 
@@ -292,7 +291,7 @@ OsdCudaComputeController::ApplyCatmarkVertexVerticesKernelA2(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, true);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), true);
 }
 
 void
@@ -303,8 +302,8 @@ OsdCudaComputeController::ApplyLoopEdgeVerticesKernel(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * E_IT = context->GetTable(Table::E_IT);
-    const OsdCudaTable * E_W = context->GetTable(Table::E_W);
+    const OsdCudaTable * E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT);
+    const OsdCudaTable * E_W = context->GetTable(FarSubdivisionTables<OsdVertex>::E_W);
     assert(E_IT);
     assert(E_W);
 
@@ -315,7 +314,7 @@ OsdCudaComputeController::ApplyLoopEdgeVerticesKernel(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(E_IT->GetCudaMemory()),
         static_cast<float*>(E_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -326,9 +325,9 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelB(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_IT = context->GetTable(Table::V_IT);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::V_IT);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_IT);
     assert(V_W);
@@ -341,7 +340,7 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelB(
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<int*>(V_IT->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -352,8 +351,8 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelA1(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_W);
 
@@ -364,7 +363,7 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelA1(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, false);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), false);
 }
 
 void
@@ -375,8 +374,8 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelA2(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaTable * V_ITa = context->GetTable(Table::V_ITa);
-    const OsdCudaTable * V_W = context->GetTable(Table::V_W);
+    const OsdCudaTable * V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa);
+    const OsdCudaTable * V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W);
     assert(V_ITa);
     assert(V_W);
 
@@ -387,7 +386,7 @@ OsdCudaComputeController::ApplyLoopVertexVerticesKernelA2(
         context->GetCurrentVaryingNumElements(),
         static_cast<int*>(V_ITa->GetCudaMemory()),
         static_cast<float*>(V_W->GetCudaMemory()),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, true);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), true);
 }
 
 void
@@ -398,7 +397,7 @@ OsdCudaComputeController::ApplyVertexEdits(
         static_cast<OsdCudaComputeContext*>(clientdata);
     assert(context);
 
-    const OsdCudaHEditTable *edit = context->GetEditTable(batch.tableIndex);
+    const OsdCudaHEditTable *edit = context->GetEditTable(batch.GetTableIndex());
     assert(edit);
 
     const OsdCudaTable * primvarIndices = edit->GetPrimvarIndices();
@@ -410,10 +409,10 @@ OsdCudaComputeController::ApplyVertexEdits(
             context->GetCurrentVertexNumElements()-3,
             edit->GetPrimvarOffset(),
             edit->GetPrimvarWidth(),
-            batch.vertexOffset,
-            batch.tableOffset,
-            batch.start,
-            batch.end,
+            batch.GetVertexOffset(),
+            batch.GetTableOffset(),
+            batch.GetStart(),
+            batch.GetEnd(),
             static_cast<int*>(primvarIndices->GetCudaMemory()),
             static_cast<float*>(editValues->GetCudaMemory()));
     } else if (edit->GetOperation() == FarVertexEdit::Set) {

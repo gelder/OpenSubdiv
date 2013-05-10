@@ -59,7 +59,6 @@
 #include "../osd/clComputeContext.h"
 #include "../osd/clKernelBundle.h"
 #include "../osd/error.h"
-#include "../osd/table.h"
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -140,20 +139,20 @@ OsdCLComputeController::ApplyBilinearEdgeVerticesKernel(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetBilinearEdgeKernel();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem E_IT = context->GetTable(Table::E_IT)->GetDevicePtr();
+    cl_mem E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &E_IT);
-    clSetKernelArg(kernel, 3, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 3, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetEndPtr());
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
                                       NULL, 0, NULL, NULL);
@@ -169,20 +168,20 @@ OsdCLComputeController::ApplyBilinearVertexVerticesKernel(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetBilinearVertexKernel();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
-    clSetKernelArg(kernel, 3, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 3, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetEndPtr());
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
                                       NULL, 0, NULL, NULL);
@@ -198,22 +197,22 @@ OsdCLComputeController::ApplyCatmarkFaceVerticesKernel(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetCatmarkFaceKernel();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem F_IT = context->GetTable(Table::F_IT)->GetDevicePtr();
-    cl_mem F_ITa = context->GetTable(Table::F_ITa)->GetDevicePtr();
+    cl_mem F_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::F_IT)->GetDevicePtr();
+    cl_mem F_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::F_ITa)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &F_IT);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &F_ITa);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
@@ -230,22 +229,22 @@ OsdCLComputeController::ApplyCatmarkEdgeVerticesKernel(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetCatmarkEdgeKernel();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem E_IT = context->GetTable(Table::E_IT)->GetDevicePtr();
-    cl_mem E_W = context->GetTable(Table::E_W)->GetDevicePtr();
+    cl_mem E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT)->GetDevicePtr();
+    cl_mem E_W = context->GetTable(FarSubdivisionTables<OsdVertex>::E_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &E_IT);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &E_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
@@ -262,24 +261,24 @@ OsdCLComputeController::ApplyCatmarkVertexVerticesKernelB(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetCatmarkVertexKernelB();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_IT = context->GetTable(Table::V_IT)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::V_IT)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_IT);
     clSetKernelArg(kernel, 4, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 8, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 8, sizeof(int), batch.GetEndPtr());
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
@@ -296,23 +295,23 @@ OsdCLComputeController::ApplyCatmarkVertexVerticesKernelA1(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     int ipass = false;
     cl_kernel kernel = context->GetKernelBundle()->GetCatmarkVertexKernelA();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
     clSetKernelArg(kernel, 8, sizeof(int), &ipass);
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
@@ -330,23 +329,23 @@ OsdCLComputeController::ApplyCatmarkVertexVerticesKernelA2(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     int ipass = true;
     cl_kernel kernel = context->GetKernelBundle()->GetCatmarkVertexKernelA();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
     clSetKernelArg(kernel, 8, sizeof(int), &ipass);
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
@@ -364,22 +363,22 @@ OsdCLComputeController::ApplyLoopEdgeVerticesKernel(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetLoopEdgeKernel();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem E_IT = context->GetTable(Table::E_IT)->GetDevicePtr();
-    cl_mem E_W = context->GetTable(Table::E_W)->GetDevicePtr();
+    cl_mem E_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::E_IT)->GetDevicePtr();
+    cl_mem E_W = context->GetTable(FarSubdivisionTables<OsdVertex>::E_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &E_IT);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &E_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
@@ -396,24 +395,24 @@ OsdCLComputeController::ApplyLoopVertexVerticesKernelB(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_kernel kernel = context->GetKernelBundle()->GetLoopVertexKernelB();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_IT = context->GetTable(Table::V_IT)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_IT = context->GetTable(FarSubdivisionTables<OsdVertex>::V_IT)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_IT);
     clSetKernelArg(kernel, 4, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 8, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 8, sizeof(int), batch.GetEndPtr());
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                       kernel, 1, NULL, globalWorkSize,
@@ -430,23 +429,23 @@ OsdCLComputeController::ApplyLoopVertexVerticesKernelA1(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     int ipass = false;
     cl_kernel kernel = context->GetKernelBundle()->GetLoopVertexKernelA();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
     clSetKernelArg(kernel, 8, sizeof(int), &ipass);
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
@@ -464,23 +463,23 @@ OsdCLComputeController::ApplyLoopVertexVerticesKernelA2(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     int ipass = true;
     cl_kernel kernel = context->GetKernelBundle()->GetLoopVertexKernelA();
 
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
     cl_mem varyingBuffer = context->GetCurrentVaryingBuffer();
-    cl_mem V_ITa = context->GetTable(Table::V_ITa)->GetDevicePtr();
-    cl_mem V_W = context->GetTable(Table::V_W)->GetDevicePtr();
+    cl_mem V_ITa = context->GetTable(FarSubdivisionTables<OsdVertex>::V_ITa)->GetDevicePtr();
+    cl_mem V_W = context->GetTable(FarSubdivisionTables<OsdVertex>::V_W)->GetDevicePtr();
 
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &vertexBuffer);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &varyingBuffer);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &V_ITa);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &V_W);
-    clSetKernelArg(kernel, 4, sizeof(int), &batch.vertexOffset);
-    clSetKernelArg(kernel, 5, sizeof(int), &batch.tableOffset);
-    clSetKernelArg(kernel, 6, sizeof(int), &batch.start);
-    clSetKernelArg(kernel, 7, sizeof(int), &batch.end);
+    clSetKernelArg(kernel, 4, sizeof(int), batch.GetVertexOffsetPtr());
+    clSetKernelArg(kernel, 5, sizeof(int), batch.GetTableOffsetPtr());
+    clSetKernelArg(kernel, 6, sizeof(int), batch.GetStartPtr());
+    clSetKernelArg(kernel, 7, sizeof(int), batch.GetEndPtr());
     clSetKernelArg(kernel, 8, sizeof(int), &ipass);
 
     ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
@@ -498,10 +497,10 @@ OsdCLComputeController::ApplyVertexEdits(
     assert(context);
 
     cl_int ciErrNum;
-    size_t globalWorkSize[1] = { batch.end - batch.start };
+    size_t globalWorkSize[1] = { batch.GetEnd() - batch.GetStart() };
     cl_mem vertexBuffer = context->GetCurrentVertexBuffer();
 
-    const OsdCLHEditTable * edit = context->GetEditTable(batch.tableIndex);
+    const OsdCLHEditTable * edit = context->GetEditTable(batch.GetTableIndex());
     assert(edit);
 
     const OsdCLTable * primvarIndices = edit->GetPrimvarIndices();
@@ -520,16 +519,16 @@ OsdCLComputeController::ApplyVertexEdits(
         clSetKernelArg(kernel, 2, sizeof(cl_mem), &values);
         clSetKernelArg(kernel, 3, sizeof(int), &primvarOffset);
         clSetKernelArg(kernel, 4, sizeof(int), &primvarWidth);
-        clSetKernelArg(kernel, 5, sizeof(int), &batch.vertexOffset);
-        clSetKernelArg(kernel, 6, sizeof(int), &batch.tableOffset);
-        clSetKernelArg(kernel, 7, sizeof(int), &batch.start);
-        clSetKernelArg(kernel, 8, sizeof(int), &batch.end);
+        clSetKernelArg(kernel, 5, sizeof(int), batch.GetVertexOffsetPtr());
+        clSetKernelArg(kernel, 6, sizeof(int), batch.GetTableOffsetPtr());
+        clSetKernelArg(kernel, 7, sizeof(int), batch.GetStartPtr());
+        clSetKernelArg(kernel, 8, sizeof(int), batch.GetEndPtr());
 
         ciErrNum = clEnqueueNDRangeKernel(context->GetCommandQueue(),
                                           kernel, 1, NULL, globalWorkSize,
                                           NULL, 0, NULL, NULL);
         
-        CL_CHECK_ERROR(ciErrNum, "vertex edit %d %d\n", batch.tableIndex, ciErrNum);
+        CL_CHECK_ERROR(ciErrNum, "vertex edit %d %d\n", batch.GetTableIndex(), ciErrNum);
 
     } else if (edit->GetOperation() == FarVertexEdit::Set) {
         // XXXX TODO

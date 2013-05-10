@@ -64,7 +64,6 @@
 #include "../osd/glslTransformFeedbackComputeController.h"
 #include "../osd/glslTransformFeedbackComputeContext.h"
 #include "../osd/glslTransformFeedbackKernelBundle.h"
-#include "../osd/table.h"
 
 #include <algorithm>
 #include <cassert>
@@ -123,7 +122,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyBilinearFaceVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -141,7 +140,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyBilinearEdgeVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -159,7 +158,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyBilinearVertexVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -177,7 +176,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyCatmarkFaceVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 
@@ -197,7 +196,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyCatmarkEdgeVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -215,7 +214,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyCatmarkVertexVerticesKernelB(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -233,7 +232,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyCatmarkVertexVerticesKernelA1(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, false);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), false);
 }
 
 void
@@ -251,7 +250,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyCatmarkVertexVerticesKernelA2(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, true);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), true);
 }
 
 void
@@ -269,7 +268,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyLoopEdgeVerticesKernel(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -287,7 +286,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyLoopVertexVerticesKernelB(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
 }
 
 void
@@ -305,7 +304,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyLoopVertexVerticesKernelA1(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, false);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), false);
 }
 
 void
@@ -323,7 +322,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyLoopVertexVerticesKernelA2(
         context->GetNumCurrentVertexElements(),
         context->GetCurrentVaryingBuffer(),
         context->GetNumCurrentVaryingElements(),
-        batch.vertexOffset, batch.tableOffset, batch.start, batch.end, true);
+        batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd(), true);
 }
 
 void
@@ -336,10 +335,10 @@ OsdGLSLTransformFeedbackComputeController::ApplyVertexEdits(
 
     OsdGLSLTransformFeedbackKernelBundle * kernelBundle = context->GetKernelBundle();
 
-    const OsdGLSLTransformFeedbackHEditTable * edit = context->GetEditTable(batch.tableIndex);
+    const OsdGLSLTransformFeedbackHEditTable * edit = context->GetEditTable(batch.GetTableIndex());
     assert(edit);
 
-    context->BindEditTextures(batch.tableIndex);
+    context->BindEditTextures(batch.GetTableIndex());
 
     int primvarOffset = edit->GetPrimvarOffset();
     int primvarWidth = edit->GetPrimvarWidth();
@@ -351,7 +350,7 @@ OsdGLSLTransformFeedbackComputeController::ApplyVertexEdits(
             context->GetCurrentVaryingBuffer(),
             context->GetNumCurrentVaryingElements(),
             primvarOffset, primvarWidth,
-            batch.vertexOffset, batch.tableOffset, batch.start, batch.end);
+            batch.GetVertexOffset(), batch.GetTableOffset(), batch.GetStart(), batch.GetEnd());
     } else {
         // XXX: edit SET is not implemented yet.
     }
