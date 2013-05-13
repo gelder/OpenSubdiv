@@ -55,42 +55,20 @@
 //     a particular purpose and non-infringement.
 //
 
-#if defined(__APPLE__)
-    #include <OpenGL/gl3.h>
-    #define GLFW_INCLUDE_GL3
-    #define GLFW_NO_GLU
-#else
     #include <stdlib.h>
-    #include <GL/glew.h>
-    #if defined(WIN32)
-        #include <GL/wglew.h>
-    #endif
-#endif
-
-#if defined(GLFW_VERSION_3)
-    #include <GL/glfw3.h>
-    GLFWwindow* g_window=0;
-    GLFWmonitor* g_primary=0;
-#else
-    #include <GL/glfw.h>
-#endif
 
 #include <osd/cpuComputeContext.h>
 #include <osd/cpuComputeController.h>
 #include <osd/cpuEvalLimitContext.h>
 #include <osd/cpuEvalLimitController.h>
 #include <osd/cpuVertexBuffer.h>
-#include <osd/cpuGLVertexBuffer.h>
 #include <osd/error.h>
-#include <osd/drawContext.h>
 #include <osd/mesh.h>
 #include <osd/vertex.h>
 
 #include "shape.h"
 
 #include "../common/stopwatch.h"
-#include "../common/simple_math.h"
-#include "../common/gl_hud.h"
 
 #include <cfloat>
 #include <vector>
@@ -114,58 +92,12 @@ typedef FarMesh<OsdVertex>              OsdFarMesh;
 typedef FarMeshFactory<OsdVertex>       OsdFarMeshFactory;
 typedef FarSubdivisionTables<OsdVertex> OsdFarMeshSubdivision;
 
-//------------------------------------------------------------------------------
-struct SimpleShape {
-    std::string  name;
-    Scheme       scheme;
-    std::string  data;
-
-    SimpleShape() { }
-    SimpleShape( std::string const & idata, char const * iname, Scheme ischeme )
-        : name(iname), scheme(ischeme), data(idata) { }
-};
-
-std::vector<SimpleShape> g_defaultShapes;
-
 std::vector<float> g_orgPositions,
                    g_positions;
 
 int g_currentShape = 0,
     g_level = 3,
     g_numElements = 3;
-
-std::vector<int>   g_coarseEdges;
-std::vector<float> g_coarseEdgeSharpness;
-std::vector<float> g_coarseVertexSharpness;
-
-int   g_running = 1,
-      g_width = 1024,
-      g_height = 1024,
-      g_fullscreen = 0,
-      g_drawCageEdges = 1,
-      g_drawCageVertices = 0,
-      g_prev_x = 0,
-      g_prev_y = 0,
-      g_mbutton[3] = {0, 0, 0},
-      g_frame=0,
-      g_freeze=0,
-      g_repeatCount;
-
-float g_rotate[2] = {0, 0},
-      g_dolly = 5,
-      g_pan[2] = {0, 0},
-      g_center[3] = {0, 0, 0},
-      g_size = 0,
-      g_moveScale = 0.0f;
-
-GLuint g_transformUB = 0,
-       g_transformBinding = 0;
-
-struct Transform {
-    float ModelViewMatrix[16];
-    float ProjectionMatrix[16];
-    float ModelViewProjectionMatrix[16];
-} g_transformData;
 
 
 // performance
@@ -180,63 +112,10 @@ OsdCpuVertexBuffer * g_samplesVB=0;
 int g_nsamples=1000,
     g_nsamplesFound=0;
 
-GLuint g_cageEdgeVAO = 0,
-       g_cageEdgeVBO = 0,
-       g_cageVertexVAO = 0,
-       g_cageVertexVBO = 0,
-       g_samplesVAO=0;
-
-GLhud g_hud;
-
-//------------------------------------------------------------------------------
-static void
-createCoarseMesh( OsdHbrMesh * const hmesh, int nfaces ) {
-    // save coarse topology (used for coarse mesh drawing)
-    g_coarseEdges.clear();
-    g_coarseEdgeSharpness.clear();
-    g_coarseVertexSharpness.clear();
-
-    for(int i=0; i<nfaces; ++i) {
-        OsdHbrFace *face = hmesh->GetFace(i);
-        int nv = face->GetNumVertices();
-        for(int j=0; j<nv; ++j) {
-            g_coarseEdges.push_back(face->GetVertex(j)->GetID());
-            g_coarseEdges.push_back(face->GetVertex((j+1)%nv)->GetID());
-            g_coarseEdgeSharpness.push_back(face->GetEdge(j)->GetSharpness());
-        }
-    }
-    int nv = hmesh->GetNumVertices();
-    for(int i=0; i<nv; ++i) {
-        g_coarseVertexSharpness.push_back(hmesh->GetVertex(i)->GetSharpness());
-    }
-}
 
 //------------------------------------------------------------------------------
 static int
-createRandomSamples( int nfaces, int nsamples, std::vector<OsdEvalCoords> & coords ) {
-
-    coords.resize(nfaces * nsamples);
-
-    OsdEvalCoords * coord = &coords[0];
-    
-    // large Pell prime number
-    srand( static_cast<int>(2147483647) );
-    
-    for (int i=0; i<nfaces; ++i) {
-        for (int j=0; j<nsamples; ++j) {
-            coord->face = i;
-            coord->u = (float)rand()/(float)RAND_MAX;
-            coord->v = (float)rand()/(float)RAND_MAX;
-            ++coord;
-        }
-    }
-        
-    return (int)coords.size();
-}
-
-//------------------------------------------------------------------------------
-static int
-getNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
+GetNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
 
     OsdHbrFace * lastface = hmesh->GetFace( nfaces-1 );
     assert(lastface);
@@ -248,6 +127,7 @@ getNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
 
     return ++result;
 }
+
 
 //------------------------------------------------------------------------------
 OsdCpuComputeContext * g_computeCtx = 0;
@@ -263,11 +143,6 @@ OsdVertexBufferDescriptor g_idesc( /*offset*/ 0, /*legnth*/ 3, /*stride*/ 3 ),
 
 std::vector<OsdEvalCoords> g_coords;
 
-OsdCpuGLVertexBuffer * g_Q=0,
-                     * g_dQu=0,
-                     * g_dQv=0;
-                     
-OsdFarMesh * g_fmesh=0;
 
 //------------------------------------------------------------------------------
 static void
@@ -367,27 +242,23 @@ createOsdMesh(int level)
                         2, 8, 6, 4,
                         7, 1, 3, 5};
     
-    Scheme scheme = kCatmark;
+
+//    Scheme scheme = kCatmark;
 
     
     OpenSubdivShape shape(points, sizeof(points)/(3*sizeof(float)),
                           nvertsPerFace, sizeof(nvertsPerFace)/sizeof(int),
                           faceverts, sizeof(faceverts)/sizeof(int));
-    // Create HBR mesh
-    OsdHbrMesh * hmesh = simpleHbr<OsdVertex>(shape.c_str(), scheme, g_orgPositions);
+
+    OsdHbrMesh<OsdVertex> *hmesh = shape.GetHbrMesh();
+    
+    std::cout << "Made the shape\n";
 
     g_positions.resize(g_orgPositions.size(),0.0f);
 
     int nfaces = hmesh->GetNumFaces(),
-        nptexfaces = getNumPtexFaces(hmesh, nfaces);
+        nptexfaces = GetNumPtexFaces(hmesh, nfaces);
     
-    // Generate sample locations 
-    int nsamples = createRandomSamples( nptexfaces, g_nsamples, g_coords );
-
-    createCoarseMesh(hmesh, nfaces);
-
-
-
     // Create FAR mesh
     OsdFarMeshFactory factory( hmesh, level, /*adaptive*/ true);    
     
@@ -402,14 +273,12 @@ createOsdMesh(int level)
     delete g_samplesVB;
     g_samplesVB = OsdCpuVertexBuffer::Create(3, nverts);
 
-
         
     // Create a Compute context, used to "pose" the vertices
     delete g_computeCtx;
     g_computeCtx = OsdCpuComputeContext::Create(g_fmesh);
     
     g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_samplesVB );
-    
 
     
     // Create eval context & data buffers
@@ -827,7 +696,7 @@ keyboard(int key, int event) {
 
 //------------------------------------------------------------------------------
 static void
-callbackError(OpenSubdiv::OsdErrorType err, const char *message)
+callbackError(OsdErrorType err, const char *message)
 {
     printf("OsdError: %d\n", err);
     printf("%s", message);
@@ -853,7 +722,7 @@ static void
 callbackLevel(int l)
 {
     g_level = l;
-    createOsdMesh( g_leval);
+    createOsdMesh( g_level);
 }
 
 //------------------------------------------------------------------------------
@@ -947,7 +816,7 @@ int main(int, char**) {
 
     OsdSetErrorCallback(callbackError);
     
-    initializeShapes();
+//    initializeShapes();
 
     if (not glfwInit()) {
         printf("Failed to initialize GLFW\n");

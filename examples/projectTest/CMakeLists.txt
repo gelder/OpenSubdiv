@@ -59,24 +59,17 @@
 
 set(PLATFORM_LIBRARIES
     ${OSD_LINK_TARGET}
-    ${GLEW_LIBRARY}
-    ${GLFW_LIBRARIES}
 )
 
 include_directories(
     ${PROJECT_SOURCE_DIR}/opensubdiv
     ${PROJECT_SOURCE_DIR}/regression
-    ${GLEW_INCLUDE_DIR}
-    ${GLFW_INCLUDE_DIR}
 )
 
 add_executable(projectTest
     main.cpp
     shape.h
     shape.cpp
-    ../common/font_image.cpp
-    ../common/hud.cpp
-    ../common/gl_hud.cpp
     ${INC_FILES}
 )
 

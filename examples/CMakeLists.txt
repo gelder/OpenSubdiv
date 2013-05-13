@@ -58,9 +58,9 @@
 if( OPENGL_FOUND AND (GLEW_FOUND AND GLFW_FOUND) OR (APPLE AND GLFW_FOUND))
     add_subdirectory(glViewer)
     add_subdirectory(glBatchViewer)
+    add_subdirectory(limitEval)    
     add_subdirectory(simpleCpu)
     add_subdirectory(projectTest)
-    add_subdirectory(limitEval)
     if(NOT APPLE)
         # the paintTest example requires GL functionality not available on OSX
         add_subdirectory(paintTest)

@@ -59,6 +59,7 @@
 #define OSD_SHAPE_H
 
 #include <hbr/mesh.h>
+#include <osd/vertex.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -67,26 +68,6 @@
 #include <string>
 #include <sstream>
 #include <vector>
-
-//------------------------------------------------------------------------------
-static char const * sgets( char * s, int size, char ** stream ) {
-    for (int i=0; i<size; ++i) {
-        if ( (*stream)[i]=='\n' or (*stream)[i]=='\0') {
-
-            memcpy(s, *stream, i);
-            s[i]='\0';
-
-            if ((*stream)[i]=='\0')
-                return 0;
-            else {
-                (*stream) += i+1;
-                return s;
-            }
-        }
-    }
-    return 0;
-}
-
 
 //------------------------------------------------------------------------------
 enum Scheme {
@@ -131,17 +112,32 @@ class OpenSubdivShape {
 
     // Return the hbr mesh, allocating and filling it if needed
     OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> *GetHbrMesh();
-    
+
+
+    // Return the far mesh, allocating and filling it if needed
+    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex> *GetFarMesh();    
+
     int GetNverts() const { return (int)_verts.size()/3; }
 
     int GetNfaces() const { return (int)_nvertsPerFace.size(); }
 
+
+    const std::vector<float>  &GetVerts() { return _verts;}
+    const std::vector<float>  &GetUVs() { return _uvs;}
+    const std::vector<float>  &GetNormals() { return _normals;}
+    const std::vector<int>    &GetNVertsPerFace() { return _nvertsPerFace;}
+    const std::vector<int>    &GetFaceVerts() { return _faceverts;}
+    const std::vector<int>    &GetFaceUVs() { return _faceuvs;}       
+    const std::vector<int>    &GetFaceNormals() { return _facenormals;}
+    const std::vector<tag *>  &GetTags() { return _tags;}
+    
+    Scheme                    &GetScheme() { return _scheme;}
     
     
   private:
 
     OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *CreateMesh(
-        OpenSubdiv::Scheme scheme = kCatmark);
+        Scheme scheme = kCatmark);
     
     std::vector<float>  _verts;
     std::vector<float>  _uvs;
@@ -154,10 +150,12 @@ class OpenSubdivShape {
     Scheme              _scheme;
 
 
-    // Initialized to NULL, only allocated if feature adaptive refinement
-    // is required, not if subdivision/patch tables are loaded.
+    // The hbrMesh and farMesh are initialized to NULL, only allocated if
+    // feature adaptive refinement is required, not if subdivision/patch
+    // tables are loaded.
     //
     OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *_hbrMesh;
+    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>  *_farMesh;    
     
 };
 
