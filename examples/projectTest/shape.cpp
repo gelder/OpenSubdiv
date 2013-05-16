@@ -65,10 +65,12 @@
 #include <hbr/cornerEdit.h>
 #include <hbr/holeEdit.h>
 
+using namespace OpenSubdiv;
+using namespace std;
 
 //------------------------------------------------------------------------------
 template <class T> std::string   
-hbrToObj( OpenSubdiv::HbrMesh<T> * mesh ) {
+hbrToObj( HbrMesh<T> * mesh ) {
 
     std::stringstream sh;
 
@@ -85,7 +87,7 @@ hbrToObj( OpenSubdiv::HbrMesh<T> * mesh ) {
     
         sh << "f ";
         
-        OpenSubdiv::HbrFace<T> * f = mesh->GetFace(i);
+        HbrFace<T> * f = mesh->GetFace(i);
         
         for (int j=0; j<f->GetNumVertices(); ++j) {
             int vert = f->GetVertex(j)->GetID()+1;
@@ -101,7 +103,7 @@ hbrToObj( OpenSubdiv::HbrMesh<T> * mesh ) {
 
 //------------------------------------------------------------------------------
 template <class T> void
-createVertices( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, std::vector<float> * verts ) {
+createVertices( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> * verts ) {
 
     T v;
     for(int i=0;i<sh->GetNverts(); i++ ) {
@@ -112,7 +114,7 @@ createVertices( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, std::
 
 //------------------------------------------------------------------------------
 template <class T> void
-createVertices( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, std::vector<float> & verts ) {
+createVertices( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> & verts ) {
 
     T v;
     for(int i=0;i<sh->GetNverts(); i++ )
@@ -121,7 +123,7 @@ createVertices( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, std::
 #ifdef NOT_YET
 //------------------------------------------------------------------------------
 template <class T> void
-copyVertexPositions( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, std::vector<float> & verts ) {
+copyVertexPositions( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> & verts ) {
 
     int nverts = mesh->GetNumVertices();
     
@@ -134,9 +136,9 @@ copyVertexPositions( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, 
     
         for (int i=sh->GetNverts(); i<nverts; ++i) {
         
-            OpenSubdiv::HbrVertex<T> * v = mesh->GetVertex(i);
+            HbrVertex<T> * v = mesh->GetVertex(i);
             
-            OpenSubdiv::HbrFace<T> * f = v->GetIncidentEdge()->GetFace();
+            HbrFace<T> * f = v->GetIncidentEdge()->GetFace();
             
             int vidx = -1;
             for (int j=0; j<f->GetNumVertices(); ++j)
@@ -162,16 +164,16 @@ copyVertexPositions( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, 
 
 //------------------------------------------------------------------------------
 template <class T> void
-createTopology( OpenSubdivShape const * sh, OpenSubdiv::HbrMesh<T> * mesh, Scheme scheme) {
+createTopology( OpenSubdivShape const * sh, HbrMesh<T> * mesh, Scheme scheme) {
 }
 
 //------------------------------------------------------------------------------
-template <class T> OpenSubdiv::HbrMesh<T> *
+template <class T> HbrMesh<T> *
 simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> * verts=0) {
 
     OpenSubdivShape * sh = OpenSubdivShape::parseShape( shapestr );
 
-    OpenSubdiv::HbrMesh<T> * mesh = createMesh<T>(scheme);
+    HbrMesh<T> * mesh = createMesh<T>(scheme);
 
     createVertices<T>(sh, mesh, verts);
 
@@ -186,12 +188,12 @@ simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> * verts=0) {
 }
 
 //------------------------------------------------------------------------------
-template <class T> OpenSubdiv::HbrMesh<T> *
+template <class T> HbrMesh<T> *
 simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> & verts) {
 
     OpenSubdivShape * sh = OpenSubdivShape::parseShape( shapestr );
 
-    OpenSubdiv::HbrMesh<T> * mesh = createMesh<T>(scheme);
+    HbrMesh<T> * mesh = createMesh<T>(scheme);
 
     createVertices<T>(sh, mesh, verts);
 
@@ -210,6 +212,7 @@ simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> & verts) {
 //------------------------------------------------------------------------------
 // The simplest constructor, only point positions and polygonal
 // mesh topology
+/*
 OpenSubdivShape::OpenSubdivShape(const std::vector<float>  &verts,
                                  const std::vector<int>    &nvertsPerFace,
                                  const std::vector<int>    &faceverts) :
@@ -220,6 +223,246 @@ OpenSubdivShape::OpenSubdivShape(const std::vector<float>  &verts,
 {
 
 }
+*/
+
+OpenSubdivShape::OpenSubdivShape(
+    string name,
+    int numVertices,
+    int maxLevels,
+    vector<int> indices,
+    vector<int> nverts,
+    vector<string> vvNames,
+    vector<string> fvNames,
+    const vector<float>& fvData,
+    tag& tagData,
+    Scheme scheme)
+{
+    _scheme = scheme;
+    
+    HbrMesh<OsdVertex> * mesh = 0;
+    
+    static HbrBilinearSubdivision<OsdVertex> _bilinear;
+    static HbrLoopSubdivision<OsdVertex>     _loop;
+    static HbrCatmarkSubdivision<OsdVertex>  _catmark;
+    
+    switch (scheme) {
+    case kBilinear : mesh = new HbrMesh<OsdVertex>( &_bilinear ); break;
+    case kLoop     : mesh = new HbrMesh<OsdVertex>( &_loop     ); break;
+    case kCatmark  : mesh = new HbrMesh<OsdVertex>( &_catmark  ); break;
+    }
+
+    
+    //_name = name;
+    if (fvNames.empty()) {
+        _hbrMesh = new HbrMesh<OsdVertex>(&_catmark);
+    } else {
+        int fvarcount = (int) fvNames.size();
+
+        // For now we only handle 1 float per FV variable.
+        _fvarwidths.assign(fvarcount, 1);
+
+        int startIndex = 0;
+        for (int fvarindex = 0; fvarindex < fvarcount; ++fvarindex) {
+            _fvarindices.push_back(startIndex);
+            _fvaroffsets[fvNames[fvarindex]] = startIndex;
+            startIndex += _fvarwidths[fvarindex];
+        }
+
+        _hbrMesh = new HbrMesh<OsdVertex>(&_catmark, fvarcount, &_fvarindices[0],
+                               &_fvarwidths[0], fvarcount);
+    }
+    _farMesh = 0;
+    _computeContext = 0;
+    _vvNames = vvNames;
+    _fvNames = fvNames;
+
+    OsdVertex v;
+    for (int i = 0; i < numVertices; ++i) {
+        HbrVertex* hvert = _hbrMesh->NewVertex(i, v);
+        if (!hvert) {
+            TF_FATAL_ERROR("Unable to create OSD vertex from tidscene");
+        }
+    }
+
+    // Sanity check
+    int fvarWidth = _hbrMesh->GetTotalFVarWidth();
+    if (fvData.size() < nverts.size() * fvarWidth ||
+        fvarWidth != fvNames.size()) {
+        TF_FATAL_ERROR("Incorrectly sized face data: name count = %d, "
+                       "data width = %d, face count = %d, total data size = %d.",
+                       (int) fvNames.size(),
+                       fvarWidth,
+                       (int) nverts.size(),
+                       (int) fvData.size());
+    }
+
+    // Create faces
+    const int * fv=&(_faceverts[0]);
+    // face-vertex count offset
+    int fvcOffset = 0;    
+    for(int f=0, ptxidx=0;f< GetNfaces(); f++ ) {
+
+        int nv = _nvertsPerFace[f];
+
+        if ((_scheme==kLoop) and (nv!=3)) {
+            printf("Trying to create a Loop surbd with non-triangle face\n");
+            exit(1);
+        }
+
+        for(int j=0;j<nv;j++) {
+            HbrVertex<OsdVertex> * origin      = _hbrMesh->GetVertex( fv[j] );
+            HbrVertex<OsdVertex> * destination = _hbrMesh->GetVertex( fv[ (j+1)%nv] );
+            HbrHalfedge<OsdVertex> * opposite  = destination->GetEdge(origin);
+
+            if(origin==NULL || destination==NULL) {
+                printf(" An edge was specified that connected a nonexistent vertex\n");
+                exit(1);
+            }
+
+            if(origin == destination) {
+                printf(" An edge was specified that connected a vertex to itself\n");
+                exit(1);
+            }
+
+            if(opposite && opposite->GetOpposite() ) {
+                printf(" A non-manifold edge incident to more than 2 faces was found\n");
+                exit(1);
+            }
+
+            if(origin->GetEdge(destination)) {
+                printf(" An edge connecting two vertices was specified more than once."
+                       " It's likely that an incident face was flipped\n");
+                exit(1);
+            }
+        }
+
+        HbrFace<OsdVertex> * face = _hbrMesh->NewFace(nv, (int *)fv, 0);
+
+        face->SetPtexIndex(ptxidx);
+
+
+        if (!hface) {
+            TF_FATAL_ERROR("Unable to create OSD face from tidscene");
+        }
+
+        // prideout: 3/21/2013 - Inspired by "GetFVarData" in examples/mayaViewer/hbrUtil.cpp
+        if (!fvNames.empty()) {
+            const float* faceData = &(fvData[fvcOffset*fvarWidth]);
+            for (int fvi = 0; fvi < nv; ++fvi) {
+                int vindex = indices[fvi + fvcOffset];
+                HbrVertex* v = _hbrMesh->GetVertex(vindex);
+                HbrFVarData& fvarData = v->GetFVarData(hface);
+                if (!fvarData.IsInitialized()) {
+                    fvarData.SetAllData(fvarWidth, faceData); 
+                } else if (!fvarData.CompareAll(fvarWidth, faceData)) {
+
+                    // If data exists for this face vertex, but is different
+                    // (e.g. we're on a UV seam) create another fvar datum
+                    HbrFVarData& fvarData = v->NewFVarData(hface);
+                    fvarData.SetAllData(fvarWidth, faceData);
+                }
+
+                // Advance pointer to next set of face-varying data
+                faceData += fvarWidth;
+            }
+        }
+
+        fvcOffset += nv;
+        
+        if ( (_scheme==kCatmark or _scheme==kBilinear) and nv != 4 )
+            ptxidx+=nv;
+        else
+            ptxidx++;
+
+        fv+=nv;
+    }
+
+
+    _ProcessTagsAndFinishMesh(
+        _hbrMesh, tagData.tags, tagData.numArgs, tagData.intArgs,
+        tagData.floatArgs, tagData.stringArgs);
+
+    FarMeshFactory meshFactory(_hbrMesh, maxLevels, false);
+
+    _farMesh = meshFactory.Create();
+    _computeContext = ComputeContext::Create(_farMesh);
+    _vertexBuffer = VertexBuffer::Create(
+        3, _farMesh->GetNumVertices());
+
+    if (vvNames.empty()) {
+        _vvBuffer = 0;
+    } else {
+        _vvBuffer = VertexBuffer::Create(
+            vvNames.size(), _farMesh->GetNumVertices());
+    }
+}
+
+void
+OpenSubdivShape::SetCoarsePositions(const vector<float>& coords)
+{
+    const float* pFloats = &coords.front();
+    int numFloats = (int) coords.size();
+    _vertexBuffer->UpdateData(pFloats, 0, numFloats / 3);
+}
+
+void
+OpenSubdivShape::SetVVData(const vector<float>& data)
+{
+    if (!_vvBuffer) {
+        if (!data.empty()) {
+            TF_FATAL_ERROR("Mesh was not constructed with VV variables.");
+        }
+        return;
+    }
+
+    int numElements = _vvBuffer->GetNumElements();
+    int numVertices = (int) data.size() / numElements;
+    const float* pFloats = &data.front();
+    _vvBuffer->UpdateData(pFloats, 0, numVertices);
+}
+
+// Interleave the face-varying sets specified by "names", adding
+// floats into the "fvdata" vector.  The number of added floats is:
+//    names.size() * NumRefinedFaces * 4
+void
+OpenSubdivShape::GetFVData(
+    int level, const vector<string>& names, vector<float>* outdata)
+{
+    // First some sanity checking.
+    if (!outdata) {
+        return;
+    }
+    TF_FOR_ALL(nameit, names) {
+        string name = *nameit;
+        if (_fvaroffsets.find(name) == _fvaroffsets.end()) {
+            printf("Can't find facevarying variable %s\n", name.c_str());
+            return;
+        }
+    }
+
+    // Fetch *all* faces; this includes all subdivision levels.
+    vector<HbrFace *> faces;
+    _hbrMesh->GetFaces(std::back_inserter(faces));
+
+    // Iterate through all faces, filtering on the requested subdivision level.
+    TF_FOR_ALL(faceit, faces) {
+        HbrFace* face = *faceit;
+        if (face->GetDepth() != level) {
+            continue;
+        }
+        int ncorners = face->GetNumVertices();
+        for (int corner = 0; corner < ncorners; ++corner) {
+            HbrFVarData& fvariable = face->GetFVarData(corner);
+            TF_FOR_ALL(nameit, names) {
+                string name = *nameit;
+                int offset = _fvaroffsets[name];
+                const float* data = fvariable.GetData(offset);
+                outdata->push_back(*data);
+            }
+        }
+    }
+}
+
 
 OpenSubdivShape::OpenSubdivShape(const float* points,
                                  int pointsLen /*= # of 3-float points*/, 
@@ -264,12 +507,15 @@ OpenSubdivShape::~OpenSubdivShape() {
     for (int i=0; i<(int)_tags.size(); ++i)
         delete _tags[i];
 
-//    if (_hbrMesh)
-//        delete _hbrMesh;
+    delete _hbrMesh;
+    delete _farMesh;
+    delete _computeContext;
+    delete _vertexBuffer;
+    delete _vvBuffer;
 }
 
 
-OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>*
+HbrMesh<OsdVertex>*
 OpenSubdivShape::GetHbrMesh()
 {
 
@@ -279,66 +525,12 @@ OpenSubdivShape::GetHbrMesh()
 
     _hbrMesh = CreateMesh();
     
-    const int * fv=&(_faceverts[0]);
-    for(int f=0, ptxidx=0;f< GetNfaces(); f++ ) {
-
-        int nv = _nvertsPerFace[f];
-
-        if ((_scheme==kLoop) and (nv!=3)) {
-            printf("Trying to create a Loop surbd with non-triangle face\n");
-            exit(1);
-        }
-
-        for(int j=0;j<nv;j++) {
-            OpenSubdiv::HbrVertex<OpenSubdiv::OsdVertex> * origin      = _hbrMesh->GetVertex( fv[j] );
-            OpenSubdiv::HbrVertex<OpenSubdiv::OsdVertex> * destination = _hbrMesh->GetVertex( fv[ (j+1)%nv] );
-            OpenSubdiv::HbrHalfedge<OpenSubdiv::OsdVertex> * opposite  = destination->GetEdge(origin);
-
-            if(origin==NULL || destination==NULL) {
-                printf(" An edge was specified that connected a nonexistent vertex\n");
-                exit(1);
-            }
-
-            if(origin == destination) {
-                printf(" An edge was specified that connected a vertex to itself\n");
-                exit(1);
-            }
-
-            if(opposite && opposite->GetOpposite() ) {
-                printf(" A non-manifold edge incident to more than 2 faces was found\n");
-                exit(1);
-            }
-
-            if(origin->GetEdge(destination)) {
-                printf(" An edge connecting two vertices was specified more than once."
-                       " It's likely that an incident face was flipped\n");
-                exit(1);
-            }
-        }
-
-        OpenSubdiv::HbrFace<OpenSubdiv::OsdVertex> * face = _hbrMesh->NewFace(nv, (int *)fv, 0);
-
-        face->SetPtexIndex(ptxidx);
-
-        if ( (_scheme==kCatmark or _scheme==kBilinear) and nv != 4 )
-            ptxidx+=nv;
-        else
-            ptxidx++;
-
-        fv+=nv;
-    }
-
-    _hbrMesh->SetInterpolateBoundaryMethod( OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>::k_InterpolateBoundaryEdgeOnly );
-
-    //applyTags( _hbrMesh, sh );
-    
-    _hbrMesh->Finish();
     
     return _hbrMesh;
 }
 
 
-OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>*
+FarMesh<OsdVertex>*
 OpenSubdivShape::GetFarMesh()
 {
 
@@ -357,21 +549,9 @@ OpenSubdivShape::GetFarMesh()
 }
 
 //------------------------------------------------------------------------------
-OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>*
+HbrMesh<OsdVertex>*
 OpenSubdivShape::CreateMesh(Scheme scheme)
 {       
-    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> * mesh = 0;
-
-    static OpenSubdiv::HbrBilinearSubdivision<OpenSubdiv::OsdVertex> _bilinear;
-    static OpenSubdiv::HbrLoopSubdivision<OpenSubdiv::OsdVertex>     _loop;
-    static OpenSubdiv::HbrCatmarkSubdivision<OpenSubdiv::OsdVertex>  _catmark;
-
-    switch (scheme) {
-    case kBilinear : mesh = new OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>( &_bilinear ); break;
-    case kLoop     : mesh = new OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>( &_loop     ); break;
-    case kCatmark  : mesh = new OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>( &_catmark  ); break;
-    }
-
     return mesh;
 }
 

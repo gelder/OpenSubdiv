@@ -59,12 +59,17 @@
 #define OSD_SHAPE_H
 
 #include <hbr/mesh.h>
+#include <far/mesh.h>
 #include <osd/vertex.h>
+#include <osd/cpuComputeContext.h>
+#include <osd/cpuComputeController.h>
+#include <osd/cpuVertexBuffer.h>
 
 #include <stdio.h>
 #include <string.h>
 
 #include <list>
+#include <map>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -93,11 +98,19 @@ class OpenSubdivShape {
         std::vector<std::string> stringargs;
     };
 
-    // The simplest constructor, only point positions and polygonal
-    // mesh topology
-    OpenSubdivShape(const std::vector<float>  &points,
-                    const std::vector<int>    &nvertsPerFace,
-                    const std::vector<int>    &faceverts);
+
+    OpenSubdivShape(
+        std::string name,
+        int numVertices,
+        int maxLevels,
+        std::vector<int> indices,
+        std::vector<int> nverts,
+        std::vector<std::string> vvNames,
+        std::vector<std::string> fvNames,
+        const std::vector<float>& fvData,
+        tag& tagData,
+        Scheme scheme);
+
 
     // Constructor using raw types.
     //
@@ -123,40 +136,72 @@ class OpenSubdivShape {
 
 
     const std::vector<float>  &GetVerts() { return _verts;}
-    const std::vector<float>  &GetUVs() { return _uvs;}
-    const std::vector<float>  &GetNormals() { return _normals;}
     const std::vector<int>    &GetNVertsPerFace() { return _nvertsPerFace;}
     const std::vector<int>    &GetFaceVerts() { return _faceverts;}
-    const std::vector<int>    &GetFaceUVs() { return _faceuvs;}       
-    const std::vector<int>    &GetFaceNormals() { return _facenormals;}
+//    const std::vector<int>    &GetFaceUVs() { return _faceuvs;}       
+//    const std::vector<int>    &GetFaceNormals() { return _facenormals;}
     const std::vector<tag *>  &GetTags() { return _tags;}
     
     Scheme                    &GetScheme() { return _scheme;}
+
+    void SetCoarsePositions(const std::vector<float>& coords);
+    void SetVVData(const std::vector<float>& data);
+    void GetFVData(int subdivisionLevel,
+                   const std::vector<std::string>& names,
+                   std::vector<float>* fvdata);
     
     
   private:
 
     OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *CreateMesh(
         Scheme scheme = kCatmark);
-    
+
+    // Positions of points in the coarse mesh, 3 floats per point
     std::vector<float>  _verts;
-    std::vector<float>  _uvs;
-    std::vector<float>  _normals;
+
+    // A vector with one entry for every face (length = number of faces) in
+    // the coarse mesh. Each entry is the number of verts in that face
     std::vector<int>    _nvertsPerFace;
+
+    // Index for each point in each face into vertex buffers.  The
+    // length is the sum of all the entries in nvertsPerFace
     std::vector<int>    _faceverts;
-    std::vector<int>    _faceuvs;
-    std::vector<int>    _facenormals;
+
+    // Annotation on the coarse mesh for things like creases. 
     std::vector<tag *>  _tags;
     Scheme              _scheme;
 
 
-    // The hbrMesh and farMesh are initialized to NULL, only allocated if
-    // feature adaptive refinement is required, not if subdivision/patch
-    // tables are loaded.
-    //
-    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *_hbrMesh;
-    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>  *_farMesh;    
+    // Names of vertex varying (vv) attributes
+    std::vector<std::string> _vvNames;
+
+    // Names of face varying (fv) attributes
+    std::vector<std::string> _fvNames;
+
+    // Size and indexing information for face varying data
+    std::vector<int> _fvarwidths;
+    std::vector<int> _fvarindices;
+    std::map<std::string, int> _fvaroffsets;
     
+    // The next block of member variables are the OpenSubdiv meshes,
+    // buffers, and computational objects used to generate the refined
+    // subdivision surface
+    //
+
+    // The lowest level mesh, it definites the polygonal topology
+    // and is used for refinement
+    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>*  _hbrMesh;
+
+    // A mesh of patches (adaptive), or quads (uniform) generated
+    // by performing feature adaptive or uniform subdivision on the hbrMesh
+    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>*  _farMesh;
+
+    // An object used to compute values based on the farMesh
+    OpenSubdiv::OsdCpuComputeContext*            _computeContext;
+
+    // Two buffers used to store computed values
+    OpenSubdiv::OsdCpuVertexBuffer*              _vertexBuffer;
+    OpenSubdiv::OsdCpuVertexBuffer*              _vvBuffer;
 };
 
 
