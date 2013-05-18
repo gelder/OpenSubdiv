@@ -74,16 +74,17 @@
 #include <sstream>
 #include <vector>
 
-//------------------------------------------------------------------------------
-enum Scheme {
-  kBilinear,
-  kCatmark,
-  kLoop
-};
+
 
 //------------------------------------------------------------------------------
 
 class OpenSubdivShape {
+
+    enum Scheme {
+        kBilinear,
+        kCatmark,
+        kLoop
+    };
 
   public:
     struct tag {
@@ -123,23 +124,13 @@ class OpenSubdivShape {
 
     ~OpenSubdivShape();
 
-    // Return the hbr mesh, allocating and filling it if needed
-    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> *GetHbrMesh();
-
-
-    // Return the far mesh, allocating and filling it if needed
-    OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex> *GetFarMesh();    
-
     int GetNverts() const { return (int)_verts.size()/3; }
 
     int GetNfaces() const { return (int)_nvertsPerFace.size(); }
 
-
     const std::vector<float>  &GetVerts() { return _verts;}
     const std::vector<int>    &GetNVertsPerFace() { return _nvertsPerFace;}
     const std::vector<int>    &GetFaceVerts() { return _faceverts;}
-//    const std::vector<int>    &GetFaceUVs() { return _faceuvs;}       
-//    const std::vector<int>    &GetFaceNormals() { return _facenormals;}
     const std::vector<tag *>  &GetTags() { return _tags;}
     
     Scheme                    &GetScheme() { return _scheme;}
@@ -153,8 +144,15 @@ class OpenSubdivShape {
     
   private:
 
-    OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex>  *CreateMesh(
-        Scheme scheme = kCatmark);
+
+    void _ProcessTagsAndFinishMesh(
+        OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> *mesh,
+        std::vector<std::string> &tags,
+        std::vector<int> &numArgs,
+        std::vector<int> &intArgs,
+        std::vector<float> &floatArgs,
+        std::vector<std::string> &stringArgs);
+
 
     // Positions of points in the coarse mesh, 3 floats per point
     std::vector<float>  _verts;

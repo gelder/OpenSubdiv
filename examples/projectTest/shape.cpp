@@ -65,6 +65,8 @@
 #include <hbr/cornerEdit.h>
 #include <hbr/holeEdit.h>
 
+#include <far/meshFactory.h>
+
 using namespace OpenSubdiv;
 using namespace std;
 
@@ -120,92 +122,6 @@ createVertices( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float
     for(int i=0;i<sh->GetNverts(); i++ )
         mesh->NewVertex( i, v );
 }
-#ifdef NOT_YET
-//------------------------------------------------------------------------------
-template <class T> void
-copyVertexPositions( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> & verts ) {
-
-    int nverts = mesh->GetNumVertices();
-    
-    verts.resize( nverts * 3 );
-    
-    std::copy(sh->GetVerts.begin(), sh->GetVerts.end(), verts.begin());
-    
-    // Sometimes Hbr dupes some vertices during Mesh::Finish()
-    if (nverts > sh->GetNverts()) {
-    
-        for (int i=sh->GetNverts(); i<nverts; ++i) {
-        
-            HbrVertex<T> * v = mesh->GetVertex(i);
-            
-            HbrFace<T> * f = v->GetIncidentEdge()->GetFace();
-            
-            int vidx = -1;
-            for (int j=0; j<f->GetNumVertices(); ++j)
-                if (f->GetVertex(j)==v) {
-                    vidx = j;
-                    break;
-                }
-            assert(vidx>-1);
-        
-            const int * shfaces = &sh->faceverts[0];
-            for (int j=0; j<f->GetID(); ++j)
-                shfaces += sh->nvertsPerFace[j];
-        
-            int shvert = shfaces[vidx];
-            
-            verts[i*3+0] = sh->GetVerts[shvert*3+0];
-            verts[i*3+1] = sh->GetVerts[shvert*3+1];
-            verts[i*3+2] = sh->GetVerts[shvert*3+2];
-        }
-    }
-}
-
-
-//------------------------------------------------------------------------------
-template <class T> void
-createTopology( OpenSubdivShape const * sh, HbrMesh<T> * mesh, Scheme scheme) {
-}
-
-//------------------------------------------------------------------------------
-template <class T> HbrMesh<T> *
-simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> * verts=0) {
-
-    OpenSubdivShape * sh = OpenSubdivShape::parseShape( shapestr );
-
-    HbrMesh<T> * mesh = createMesh<T>(scheme);
-
-    createVertices<T>(sh, mesh, verts);
-
-    createTopology<T>(sh, mesh, scheme);
-
-    if(verts)
-        copyVertexPositions<T>(sh,mesh,*verts);
-
-    delete sh;
-
-    return mesh;
-}
-
-//------------------------------------------------------------------------------
-template <class T> HbrMesh<T> *
-simpleHbr(char const * shapestr, Scheme scheme, std::vector<float> & verts) {
-
-    OpenSubdivShape * sh = OpenSubdivShape::parseShape( shapestr );
-
-    HbrMesh<T> * mesh = createMesh<T>(scheme);
-
-    createVertices<T>(sh, mesh, verts);
-
-    createTopology<T>(sh, mesh, scheme);
-
-    copyVertexPositions<T>(sh,mesh,verts);
-
-    delete sh;
-
-    return mesh;
-}
-#endif
 
 
 
@@ -235,26 +151,36 @@ OpenSubdivShape::OpenSubdivShape(
     vector<string> fvNames,
     const vector<float>& fvData,
     tag& tagData,
-    Scheme scheme)
+    Scheme scheme) :
+    _scheme(scheme),    
+    _vvNames(vvNames),
+    _fvNames(fvNames),
+    _hbrMesh(NULL),
+    _farMesh(NULL),
+    _computeContext(NULL),
+    _vertexBuffer(NULL),
+    _vvBuffer(NULL)
 {
-    _scheme = scheme;
-    
-    HbrMesh<OsdVertex> * mesh = 0;
+
+    HbrSubdivision<OsdVertex> *schemeToUse = NULL;
     
     static HbrBilinearSubdivision<OsdVertex> _bilinear;
     static HbrLoopSubdivision<OsdVertex>     _loop;
     static HbrCatmarkSubdivision<OsdVertex>  _catmark;
     
     switch (scheme) {
-    case kBilinear : mesh = new HbrMesh<OsdVertex>( &_bilinear ); break;
-    case kLoop     : mesh = new HbrMesh<OsdVertex>( &_loop     ); break;
-    case kCatmark  : mesh = new HbrMesh<OsdVertex>( &_catmark  ); break;
+    case kBilinear : schemeToUse = &_bilinear; break;
+    case kLoop     : schemeToUse = &_loop; break;
+    case kCatmark  : schemeToUse = &_catmark; break;
     }
 
     
     //_name = name;
+
+    // Construct the Hbr mesh representation that will hold the
+    // coarse mesh and be refined by Far 
     if (fvNames.empty()) {
-        _hbrMesh = new HbrMesh<OsdVertex>(&_catmark);
+        _hbrMesh = new HbrMesh<OsdVertex>(schemeToUse);
     } else {
         int fvarcount = (int) fvNames.size();
 
@@ -268,27 +194,26 @@ OpenSubdivShape::OpenSubdivShape(
             startIndex += _fvarwidths[fvarindex];
         }
 
-        _hbrMesh = new HbrMesh<OsdVertex>(&_catmark, fvarcount, &_fvarindices[0],
-                               &_fvarwidths[0], fvarcount);
+        _hbrMesh = new HbrMesh<OsdVertex>(schemeToUse, fvarcount,
+                                          &_fvarindices[0],
+                                          &_fvarwidths[0], fvarcount);
     }
-    _farMesh = 0;
-    _computeContext = 0;
-    _vvNames = vvNames;
-    _fvNames = fvNames;
+    
 
+    // Create vertices in the hbr mesh
     OsdVertex v;
     for (int i = 0; i < numVertices; ++i) {
-        HbrVertex* hvert = _hbrMesh->NewVertex(i, v);
+        HbrVertex<OsdVertex>* hvert = _hbrMesh->NewVertex(i, v);
         if (!hvert) {
-            TF_FATAL_ERROR("Unable to create OSD vertex from tidscene");
+            printf("Unable to create OSD vertex from tidscene");
         }
     }
 
-    // Sanity check
+    // Sanity check on face varying data
     int fvarWidth = _hbrMesh->GetTotalFVarWidth();
     if (fvData.size() < nverts.size() * fvarWidth ||
-        fvarWidth != fvNames.size()) {
-        TF_FATAL_ERROR("Incorrectly sized face data: name count = %d, "
+        fvarWidth != (int)fvNames.size()) {
+        printf("Incorrectly sized face data: name count = %d, "
                        "data width = %d, face count = %d, total data size = %d.",
                        (int) fvNames.size(),
                        fvarWidth,
@@ -340,9 +265,9 @@ OpenSubdivShape::OpenSubdivShape(
 
         face->SetPtexIndex(ptxidx);
 
-
-        if (!hface) {
-            TF_FATAL_ERROR("Unable to create OSD face from tidscene");
+        if (!face) {
+            printf("Unable to create OSD face from tidscene");
+            exit(1);
         }
 
         // prideout: 3/21/2013 - Inspired by "GetFVarData" in examples/mayaViewer/hbrUtil.cpp
@@ -350,15 +275,15 @@ OpenSubdivShape::OpenSubdivShape(
             const float* faceData = &(fvData[fvcOffset*fvarWidth]);
             for (int fvi = 0; fvi < nv; ++fvi) {
                 int vindex = indices[fvi + fvcOffset];
-                HbrVertex* v = _hbrMesh->GetVertex(vindex);
-                HbrFVarData& fvarData = v->GetFVarData(hface);
+                HbrVertex<OsdVertex>* v = _hbrMesh->GetVertex(vindex);
+                HbrFVarData<OsdVertex>& fvarData = v->GetFVarData(face);
                 if (!fvarData.IsInitialized()) {
                     fvarData.SetAllData(fvarWidth, faceData); 
                 } else if (!fvarData.CompareAll(fvarWidth, faceData)) {
 
                     // If data exists for this face vertex, but is different
                     // (e.g. we're on a UV seam) create another fvar datum
-                    HbrFVarData& fvarData = v->NewFVarData(hface);
+                    HbrFVarData<OsdVertex>& fvarData = v->NewFVarData(face);
                     fvarData.SetAllData(fvarWidth, faceData);
                 }
 
@@ -378,21 +303,22 @@ OpenSubdivShape::OpenSubdivShape(
     }
 
 
-    _ProcessTagsAndFinishMesh(
-        _hbrMesh, tagData.tags, tagData.numArgs, tagData.intArgs,
-        tagData.floatArgs, tagData.stringArgs);
-
-    FarMeshFactory meshFactory(_hbrMesh, maxLevels, false);
+//    _ProcessTagsAndFinishMesh(
+//        _hbrMesh, tagData.tags, tagData.numArgs, tagData.intargs,
+//        tagData.floatargs, tagData.stringargs);
+    _hbrMesh->Finish();
+        
+    FarMeshFactory<OsdVertex> meshFactory(_hbrMesh, maxLevels, false);
 
     _farMesh = meshFactory.Create();
-    _computeContext = ComputeContext::Create(_farMesh);
-    _vertexBuffer = VertexBuffer::Create(
+    _computeContext = OsdCpuComputeContext::Create(_farMesh);
+    _vertexBuffer = OsdCpuVertexBuffer::Create(
         3, _farMesh->GetNumVertices());
 
     if (vvNames.empty()) {
-        _vvBuffer = 0;
+        _vvBuffer = NULL;
     } else {
-        _vvBuffer = VertexBuffer::Create(
+        _vvBuffer = OsdCpuVertexBuffer::Create(
             vvNames.size(), _farMesh->GetNumVertices());
     }
 }
@@ -400,6 +326,8 @@ OpenSubdivShape::OpenSubdivShape(
 void
 OpenSubdivShape::SetCoarsePositions(const vector<float>& coords)
 {
+    //XXX: add sanity check on size
+    
     const float* pFloats = &coords.front();
     int numFloats = (int) coords.size();
     _vertexBuffer->UpdateData(pFloats, 0, numFloats / 3);
@@ -410,7 +338,7 @@ OpenSubdivShape::SetVVData(const vector<float>& data)
 {
     if (!_vvBuffer) {
         if (!data.empty()) {
-            TF_FATAL_ERROR("Mesh was not constructed with VV variables.");
+            printf("Mesh was not constructed with VV variables.");
         }
         return;
     }
@@ -432,30 +360,27 @@ OpenSubdivShape::GetFVData(
     if (!outdata) {
         return;
     }
-    TF_FOR_ALL(nameit, names) {
-        string name = *nameit;
-        if (_fvaroffsets.find(name) == _fvaroffsets.end()) {
-            printf("Can't find facevarying variable %s\n", name.c_str());
+    for (int i=0; i<(int)names.size(); ++i) {
+        if (_fvaroffsets.find(names[i]) == _fvaroffsets.end()) {
+            printf("Can't find facevarying variable %s\n", names[i].c_str());
             return;
         }
     }
 
     // Fetch *all* faces; this includes all subdivision levels.
-    vector<HbrFace *> faces;
+    vector<HbrFace<OsdVertex> *> faces;
     _hbrMesh->GetFaces(std::back_inserter(faces));
 
     // Iterate through all faces, filtering on the requested subdivision level.
-    TF_FOR_ALL(faceit, faces) {
-        HbrFace* face = *faceit;
-        if (face->GetDepth() != level) {
+    for (int faceIndex = 0; faceIndex < (int)faces.size(); ++faceIndex) {
+        if (faces[faceIndex]->GetDepth() != level) {
             continue;
         }
-        int ncorners = face->GetNumVertices();
+        int ncorners = faces[faceIndex]->GetNumVertices();
         for (int corner = 0; corner < ncorners; ++corner) {
-            HbrFVarData& fvariable = face->GetFVarData(corner);
-            TF_FOR_ALL(nameit, names) {
-                string name = *nameit;
-                int offset = _fvaroffsets[name];
+            HbrFVarData<OsdVertex>& fvariable = faces[faceIndex]->GetFVarData(corner);
+            for (int i=0; i<(int)names.size(); ++i) {            
+                int offset = _fvaroffsets[names[i]];
                 const float* data = fvariable.GetData(offset);
                 outdata->push_back(*data);
             }
@@ -515,46 +440,158 @@ OpenSubdivShape::~OpenSubdivShape() {
 }
 
 
-HbrMesh<OsdVertex>*
-OpenSubdivShape::GetHbrMesh()
+// ProcessTagsAndFinishMesh(...)
+// This translates prman-style lists of tags into OSD method calls.
+//
+// prideout: 3/19/2013 - since tidSceneRenderer has a similar
+//           function, we should factor this into an amber utility, or
+//           into osd itself.  I'd vote for the latter.  It already has 
+//           a shapeUtils in its regression suite that almost fits the bill.
+//
+// prideout: 3/19/2013 - edits are not yet supported.
+void
+OpenSubdivShape::_ProcessTagsAndFinishMesh(
+    HbrMesh<OsdVertex> *mesh,
+    vector<string> &tags,
+    vector<int> &numArgs,
+    vector<int> &intArgs,
+    vector<float> &floatArgs,
+    vector<string> &stringArgs)
 {
+    mesh->SetInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeOnly);
 
-    if (_hbrMesh) {
-        return _hbrMesh;
+    int* currentInt = &intArgs[0];
+    float* currentFloat = &floatArgs[0];
+    string* currentString = &stringArgs[0];
+
+    // TAGS (crease, corner, hole, smooth triangles, edits(vertex,
+    // edge, face), creasemethod, facevaryingpropagatecorners, interpolateboundary
+    for(int i = 0; i < (int)tags.size(); ++i){
+	const char * tag = tags[i].c_str();
+	int nint = numArgs[3*i];
+	int nfloat = numArgs[3*i+1];
+	int nstring = numArgs[3*i+2];
+
+	// XXX could use tokens here to reduce string matching overhead
+	if(strcmp(tag, "interpolateboundary") == 0) {
+	    // Interp boundaries
+	    assert(nint == 1);
+	    switch(currentInt[0]) {
+            case 0:
+                mesh->SetInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryNone);
+                break;
+            case 1:
+                mesh->SetInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeAndCorner);
+                break;
+            case 2:
+                mesh->SetInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeOnly);
+                break;
+            default:
+                TF_WARN("Subdivmesh contains unknown interpolate boundary method: %d\n",
+                        currentInt[0]);
+		break;
+	    }
+	    // Processing of this tag is done in mesh->Finish()
+	} else if(strcmp(tag, "crease") == 0) {
+	    for(int j = 0; j < nint-1; ++j) {
+		// Find the appropriate edge
+                HbrVertex* v = mesh->GetVertex(currentInt[j]);
+                HbrVertex* w = mesh->GetVertex(currentInt[j+1]);
+                HbrHalfedge* e = NULL;
+		if(v && w) {
+		    e = v->GetEdge(w);
+		    if(!e) {
+			// The halfedge might be oriented the other way
+			e = w->GetEdge(v);
+		    }
+		}
+		if(!e) {
+		    TF_WARN("Subdivmesh has non-existent sharp edge (%d,%d).\n",
+                            currentInt[j], currentInt[j+1]);
+		} else {
+		    e->SetSharpness(std::max(0.0f, ((nfloat > 1) ? currentFloat[j] : currentFloat[0])));
+		}
+	    }
+	} else if(strcmp(tag, "corner") == 0) {
+	    for(int j = 0; j < nint; ++j) {
+                HbrVertex* v = mesh->GetVertex(currentInt[j]);
+		if(v) {
+		    v->SetSharpness(std::max(0.0f, ((nfloat > 1) ? currentFloat[j] : currentFloat[0])));
+		} else {
+		    TF_WARN("Subdivmesh has non-existent sharp vertex %d.\n", currentInt[j]);
+		}
+	    }
+	} else if(strcmp(tag, "hole") == 0) {
+	    for(int j = 0; j < nint; ++j) {
+                HbrFace<OsdVertex>* f = mesh->GetFace(currentInt[j]);
+		if(f) {
+		    f->SetHole();
+		} else {
+		    TF_WARN("Subdivmesh has hole at non-existent face %d.\n",
+                            currentInt[j]);
+		}
+	    }
+	} else if(strcmp(tag, "facevaryinginterpolateboundary") == 0) {
+	    switch(currentInt[0]) {
+            case 0:
+                mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryNone);
+                break;
+            case 1:
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryEdgeAndCorner);
+		break;
+            case 2:
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryEdgeOnly);
+		break;
+            case 3:
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryAlwaysSharp);
+		break;
+            default:
+		TF_WARN("Subdivmesh contains unknown facevarying interpolate "
+                        "boundary method: %d.\n", currentInt[0]);
+		break;
+	    }
+	} else if(strcmp(tag, "smoothtriangles") == 0) {
+	    // Do nothing - CatmarkMesh should handle it
+	} else if(strcmp(tag, "creasemethod") == 0) {
+	    if(nstring < 1) {
+		TF_WARN("Creasemethod tag missing string argument on SubdivisionMesh.\n");
+	    } else {
+                OpenSubdiv::HbrSubdivision<OpenSubdiv::OsdVertex>* subdivisionMethod = mesh->GetSubdivision();
+		if(strcmp(currentString->c_str(), "normal") == 0) {
+		    subdivisionMethod->SetCreaseSubdivisionMethod(
+                        OpenSubdiv::HbrSubdivision<OpenSubdiv::OsdVertex>::k_CreaseNormal);
+		} else if(strcmp(currentString->c_str(), "chaikin") == 0) {
+		    subdivisionMethod->SetCreaseSubdivisionMethod(
+                        OpenSubdiv::HbrSubdivision<OpenSubdiv::OsdVertex>::k_CreaseChaikin);		    
+		} else {
+		    TF_WARN("Creasemethod tag specifies unknown crease "
+                            "subdivision method '%s' on SubdivisionMesh.\n",
+                            currentString->c_str());
+		}
+	    }
+	} else if(strcmp(tag, "facevaryingpropagatecorners") == 0) {
+	    if(nint != 1) {
+		TF_WARN("Expecting single integer argument for "
+                        "\"facevaryingpropagatecorners\" on SubdivisionMesh.\n");
+	    } else {
+		mesh->SetFVarPropagateCorners(currentInt[0] != 0);
+	    }
+	} else if(strcmp(tag, "vertexedit") == 0
+		  || strcmp(tag, "edgeedit") == 0) {
+	    // XXX DO EDITS
+            TF_WARN("vertexedit and edgeedit not yet supported.\n");
+	} else {
+	    // Complain
+            TF_WARN("Unknown tag: %s.\n", tag);
+	}
+
+	// update the tag data pointers
+	currentInt += nint;
+	currentFloat += nfloat;
+	currentString += nstring;
     }
-
-    _hbrMesh = CreateMesh();
-    
-    
-    return _hbrMesh;
+    mesh->Finish();
 }
-
-
-FarMesh<OsdVertex>*
-OpenSubdivShape::GetFarMesh()
-{
-
-    if (_farMesh) {
-        return _farMesh;
-    }
-
-    // XXX how to pass in level and adaptive?
-    int level = 2;
-    
-    // Create FAR mesh
-    OsdFarMeshFactory factory( GetHbrMesh(), level, /*adaptive*/ false);    
-    
-    _farMesh = factory.Create( /*ptex*/ true, /*fvar*/ false);
-
-}
-
-//------------------------------------------------------------------------------
-HbrMesh<OsdVertex>*
-OpenSubdivShape::CreateMesh(Scheme scheme)
-{       
-    return mesh;
-}
-
 
 
 //------------------------------------------------------------------------------
