@@ -58,12 +58,14 @@
 #ifndef OSD_SHAPE_H
 #define OSD_SHAPE_H
 
-#include <hbr/mesh.h>
-#include <far/mesh.h>
+
 #include <osd/vertex.h>
 #include <osd/cpuComputeContext.h>
 #include <osd/cpuComputeController.h>
 #include <osd/cpuVertexBuffer.h>
+
+#include <far/meshFactory.h>
+#include <hbr/mesh.h>
 
 #include <stdio.h>
 #include <string.h>

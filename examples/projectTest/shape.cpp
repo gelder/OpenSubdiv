@@ -65,7 +65,9 @@
 #include <hbr/cornerEdit.h>
 #include <hbr/holeEdit.h>
 
+
 #include <far/meshFactory.h>
+#include <osd/vertex.h>
 
 using namespace OpenSubdiv;
 using namespace std;
@@ -103,25 +105,6 @@ hbrToObj( HbrMesh<T> * mesh ) {
     return sh.str();
 }
 
-//------------------------------------------------------------------------------
-template <class T> void
-createVertices( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> * verts ) {
-
-    T v;
-    for(int i=0;i<sh->GetNverts(); i++ ) {
-        v.SetPosition( sh->GetVerts()[i*3], sh->GetVerts()[i*3+1], sh->GetVerts()[i*3+2] );
-        mesh->NewVertex( i, v );
-    }
-}
-
-//------------------------------------------------------------------------------
-template <class T> void
-createVertices( OpenSubdivShape const * sh, HbrMesh<T> * mesh, std::vector<float> & verts ) {
-
-    T v;
-    for(int i=0;i<sh->GetNverts(); i++ )
-        mesh->NewVertex( i, v );
-}
 
 
 
@@ -487,7 +470,7 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
                 mesh->SetInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeOnly);
                 break;
             default:
-                TF_WARN("Subdivmesh contains unknown interpolate boundary method: %d\n",
+                printf("Subdivmesh contains unknown interpolate boundary method: %d\n",
                         currentInt[0]);
 		break;
 	    }
@@ -495,9 +478,9 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 	} else if(strcmp(tag, "crease") == 0) {
 	    for(int j = 0; j < nint-1; ++j) {
 		// Find the appropriate edge
-                HbrVertex* v = mesh->GetVertex(currentInt[j]);
-                HbrVertex* w = mesh->GetVertex(currentInt[j+1]);
-                HbrHalfedge* e = NULL;
+                HbrVertex<OsdVertex>* v = mesh->GetVertex(currentInt[j]);
+                HbrVertex<OsdVertex>* w = mesh->GetVertex(currentInt[j+1]);
+                HbrHalfedge<OsdVertex>* e = NULL;
 		if(v && w) {
 		    e = v->GetEdge(w);
 		    if(!e) {
@@ -506,7 +489,7 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 		    }
 		}
 		if(!e) {
-		    TF_WARN("Subdivmesh has non-existent sharp edge (%d,%d).\n",
+		    printf("Subdivmesh has non-existent sharp edge (%d,%d).\n",
                             currentInt[j], currentInt[j+1]);
 		} else {
 		    e->SetSharpness(std::max(0.0f, ((nfloat > 1) ? currentFloat[j] : currentFloat[0])));
@@ -514,11 +497,11 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 	    }
 	} else if(strcmp(tag, "corner") == 0) {
 	    for(int j = 0; j < nint; ++j) {
-                HbrVertex* v = mesh->GetVertex(currentInt[j]);
+                HbrVertex<OsdVertex>* v = mesh->GetVertex(currentInt[j]);
 		if(v) {
 		    v->SetSharpness(std::max(0.0f, ((nfloat > 1) ? currentFloat[j] : currentFloat[0])));
 		} else {
-		    TF_WARN("Subdivmesh has non-existent sharp vertex %d.\n", currentInt[j]);
+		    printf("Subdivmesh has non-existent sharp vertex %d.\n", currentInt[j]);
 		}
 	    }
 	} else if(strcmp(tag, "hole") == 0) {
@@ -527,26 +510,26 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 		if(f) {
 		    f->SetHole();
 		} else {
-		    TF_WARN("Subdivmesh has hole at non-existent face %d.\n",
+		    printf("Subdivmesh has hole at non-existent face %d.\n",
                             currentInt[j]);
 		}
 	    }
 	} else if(strcmp(tag, "facevaryinginterpolateboundary") == 0) {
 	    switch(currentInt[0]) {
             case 0:
-                mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryNone);
+                mesh->SetFVarInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryNone);
                 break;
             case 1:
-		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryEdgeAndCorner);
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeAndCorner);
 		break;
             case 2:
-		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryEdgeOnly);
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryEdgeOnly);
 		break;
             case 3:
-		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh::k_InterpolateBoundaryAlwaysSharp);
+		mesh->SetFVarInterpolateBoundaryMethod(HbrMesh<OsdVertex>::k_InterpolateBoundaryAlwaysSharp);
 		break;
             default:
-		TF_WARN("Subdivmesh contains unknown facevarying interpolate "
+		printf("Subdivmesh contains unknown facevarying interpolate "
                         "boundary method: %d.\n", currentInt[0]);
 		break;
 	    }
@@ -554,7 +537,7 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 	    // Do nothing - CatmarkMesh should handle it
 	} else if(strcmp(tag, "creasemethod") == 0) {
 	    if(nstring < 1) {
-		TF_WARN("Creasemethod tag missing string argument on SubdivisionMesh.\n");
+		printf("Creasemethod tag missing string argument on SubdivisionMesh.\n");
 	    } else {
                 OpenSubdiv::HbrSubdivision<OpenSubdiv::OsdVertex>* subdivisionMethod = mesh->GetSubdivision();
 		if(strcmp(currentString->c_str(), "normal") == 0) {
@@ -564,14 +547,14 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 		    subdivisionMethod->SetCreaseSubdivisionMethod(
                         OpenSubdiv::HbrSubdivision<OpenSubdiv::OsdVertex>::k_CreaseChaikin);		    
 		} else {
-		    TF_WARN("Creasemethod tag specifies unknown crease "
+		    printf("Creasemethod tag specifies unknown crease "
                             "subdivision method '%s' on SubdivisionMesh.\n",
                             currentString->c_str());
 		}
 	    }
 	} else if(strcmp(tag, "facevaryingpropagatecorners") == 0) {
 	    if(nint != 1) {
-		TF_WARN("Expecting single integer argument for "
+		printf("Expecting single integer argument for "
                         "\"facevaryingpropagatecorners\" on SubdivisionMesh.\n");
 	    } else {
 		mesh->SetFVarPropagateCorners(currentInt[0] != 0);
@@ -579,10 +562,10 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
 	} else if(strcmp(tag, "vertexedit") == 0
 		  || strcmp(tag, "edgeedit") == 0) {
 	    // XXX DO EDITS
-            TF_WARN("vertexedit and edgeedit not yet supported.\n");
+            printf("vertexedit and edgeedit not yet supported.\n");
 	} else {
 	    // Complain
-            TF_WARN("Unknown tag: %s.\n", tag);
+            printf("Unknown tag: %s.\n", tag);
 	}
 
 	// update the tag data pointers
