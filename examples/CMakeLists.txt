@@ -99,8 +99,8 @@ endif()
 
 # XXXX manuelk : turning off the maya plugin examples for now
 if(MAYA_FOUND AND (NOT APPLE))
-    add_subdirectory(mayaViewer)
+#    add_subdirectory(mayaViewer)
     if(PTEX_FOUND)
-        add_subdirectory(mayaPtexViewer)
+#        add_subdirectory(mayaPtexViewer)
     endif()
 endif()
