@@ -54,76 +54,13 @@
 //     exclude the implied warranties of merchantability, fitness for
 //     a particular purpose and non-infringement.
 //
+#ifndef COMMON_PATCH_COLORS_H
+#define COMMON_PATCH_COLORS_H
 
-#include "../osd/cpuEvalLimitContext.h"
-#include "../osd/vertexDescriptor.h"
+#include <osd/drawContext.h>
 
-#include <string.h>
-#include <cassert>
-#include <cstdio>
-#include <cmath>
+// returns a unique color for each type of feature-adaptive patches
+float const * getAdaptivePatchColor(OpenSubdiv::OsdDrawContext::PatchDescriptor const & desc);
 
-namespace OpenSubdiv {
-namespace OPENSUBDIV_VERSION {
 
-OsdCpuEvalLimitContext *
-OsdCpuEvalLimitContext::Create(FarMesh<OsdVertex> const * farmesh) {
-
-    assert(farmesh);
-    
-    // we do not support uniform yet
-    if (not farmesh->GetPatchTables())
-        return NULL;
-                                          
-    return new OsdCpuEvalLimitContext(farmesh);
-}
-
-OsdCpuEvalLimitContext::OsdCpuEvalLimitContext(FarMesh<OsdVertex> const * farmesh) :
-    OsdEvalLimitContext(farmesh) {
-    
-    FarPatchTables const * patchTables = farmesh->GetPatchTables();
-    assert(patchTables);
-
-    // copy the data from the FarTables
-    _patches = patchTables->GetPatchTable();
-
-    _patchArrays = patchTables->GetPatchArrayVector();
-    
-    _vertexValenceBuffer = patchTables->GetVertexValenceTable();
-    
-    _quadOffsetBuffer = patchTables->GetQuadOffsetTable();
-    
-    _maxValence = patchTables->GetMaxValence();
-    
-    // Copy the bitfields, the faceId will be the key to our map
-    int npatches = patchTables->GetNumPatches();
-    
-    _patchBitFields.reserve(npatches);
-
-     FarPatchTables::PatchParamTable const & ptxTable =
-         patchTables->GetPatchParamTable();
-
-     if ( not ptxTable.empty() ) {
-
-        FarPatchParam const * pptr = &ptxTable[0];
-
-        for (int arrayId = 0; arrayId < (int)_patchArrays.size(); ++arrayId) {
-
-            FarPatchTables::PatchArray const & pa = _patchArrays[arrayId];
-
-            for (unsigned int j=0; j < pa.GetNumPatches(); ++j) {
-                _patchBitFields.push_back( pptr++->bitField );
-            }
-        }
-    }
-    
-
-    _patchMap = new FarPatchTables::PatchMap( *patchTables );
-}
-
-OsdCpuEvalLimitContext::~OsdCpuEvalLimitContext() {
-    delete _patchMap;
-}
-
-} // end namespace OPENSUBDIV_VERSION
-} // end namespace OpenSubdiv
+#endif /* COMMON_PATCH_COLORS_H */

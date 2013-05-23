@@ -55,75 +55,40 @@
 //     a particular purpose and non-infringement.
 //
 
-#include "../osd/cpuEvalLimitContext.h"
-#include "../osd/vertexDescriptor.h"
+#include "patchColors.h"
 
-#include <string.h>
-#include <cassert>
-#include <cstdio>
-#include <cmath>
+float const * getAdaptivePatchColor(OpenSubdiv::OsdDrawContext::PatchDescriptor const & desc) {
 
-namespace OpenSubdiv {
-namespace OPENSUBDIV_VERSION {
+    static float _colors[4][5][4] = {{{1.0f,  1.0f,  1.0f,  1.0f},   // regular
+                                      {0.8f,  0.0f,  0.0f,  1.0f},   // boundary
+                                      {0.0f,  1.0f,  0.0f,  1.0f},   // corner
+                                      {1.0f,  1.0f,  0.0f,  1.0f},   // gregory
+                                      {1.0f,  0.5f,  0.0f,  1.0f}},  // gregory boundary
 
-OsdCpuEvalLimitContext *
-OsdCpuEvalLimitContext::Create(FarMesh<OsdVertex> const * farmesh) {
+                                     {{0.0f,  1.0f,  1.0f,  1.0f},   // regular pattern 0
+                                      {0.0f,  0.5f,  1.0f,  1.0f},   // regular pattern 1
+                                      {0.0f,  0.5f,  0.5f,  1.0f},   // regular pattern 2
+                                      {0.5f,  0.0f,  1.0f,  1.0f},   // regular pattern 3
+                                      {1.0f,  0.5f,  1.0f,  1.0f}},  // regular pattern 4
+ 
+                                     {{0.0f,  0.0f,  0.75f, 1.0f},   // boundary pattern 0
+                                      {0.0f,  0.2f,  0.75f, 1.0f},   // boundary pattern 1
+                                      {0.0f,  0.4f,  0.75f, 1.0f},   // boundary pattern 2
+                                      {0.0f,  0.6f,  0.75f, 1.0f},   // boundary pattern 3
+                                      {0.0f,  0.8f,  0.75f, 1.0f}},  // boundary pattern 4
+ 
+                                     {{0.25f, 0.25f, 0.25f, 1.0f},   // corner pattern 0
+                                      {0.25f, 0.25f, 0.25f, 1.0f},   // corner pattern 1
+                                      {0.25f, 0.25f, 0.25f, 1.0f},   // corner pattern 2
+                                      {0.25f, 0.25f, 0.25f, 1.0f},   // corner pattern 3
+                                      {0.25f, 0.25f, 0.25f, 1.0f}}}; // corner pattern 4
 
-    assert(farmesh);
-    
-    // we do not support uniform yet
-    if (not farmesh->GetPatchTables())
-        return NULL;
-                                          
-    return new OsdCpuEvalLimitContext(farmesh);
-}
+    typedef OpenSubdiv::FarPatchTables FPT;
 
-OsdCpuEvalLimitContext::OsdCpuEvalLimitContext(FarMesh<OsdVertex> const * farmesh) :
-    OsdEvalLimitContext(farmesh) {
-    
-    FarPatchTables const * patchTables = farmesh->GetPatchTables();
-    assert(patchTables);
-
-    // copy the data from the FarTables
-    _patches = patchTables->GetPatchTable();
-
-    _patchArrays = patchTables->GetPatchArrayVector();
-    
-    _vertexValenceBuffer = patchTables->GetVertexValenceTable();
-    
-    _quadOffsetBuffer = patchTables->GetQuadOffsetTable();
-    
-    _maxValence = patchTables->GetMaxValence();
-    
-    // Copy the bitfields, the faceId will be the key to our map
-    int npatches = patchTables->GetNumPatches();
-    
-    _patchBitFields.reserve(npatches);
-
-     FarPatchTables::PatchParamTable const & ptxTable =
-         patchTables->GetPatchParamTable();
-
-     if ( not ptxTable.empty() ) {
-
-        FarPatchParam const * pptr = &ptxTable[0];
-
-        for (int arrayId = 0; arrayId < (int)_patchArrays.size(); ++arrayId) {
-
-            FarPatchTables::PatchArray const & pa = _patchArrays[arrayId];
-
-            for (unsigned int j=0; j < pa.GetNumPatches(); ++j) {
-                _patchBitFields.push_back( pptr++->bitField );
-            }
-        }
+    if (desc.GetPattern()==FPT::NON_TRANSITION) {
+        return _colors[0][(int)(desc.GetType()-FPT::REGULAR)];
+    } else {
+        return _colors[(int)(desc.GetType()-FPT::REGULAR)+1][(int)desc.GetPattern()-1];
     }
-    
-
-    _patchMap = new FarPatchTables::PatchMap( *patchTables );
 }
 
-OsdCpuEvalLimitContext::~OsdCpuEvalLimitContext() {
-    delete _patchMap;
-}
-
-} // end namespace OPENSUBDIV_VERSION
-} // end namespace OpenSubdiv
