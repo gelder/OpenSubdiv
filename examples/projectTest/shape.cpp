@@ -113,40 +113,109 @@ hbrToObj( HbrMesh<T> * mesh ) {
 // mesh topology
 /*
 OpenSubdivShape::OpenSubdivShape(const std::vector<float>  &verts,
-                                 const std::vector<int>    &nvertsPerFace,
-                                 const std::vector<int>    &faceverts) :
+                                 const std::vector<int>    &nverts,
+                                 const std::vector<int>    &indices) :
     _verts(verts),
-    _nvertsPerFace(nvertsPerFace),
-    _faceverts(faceverts),
+    _nverts(nverts),
+    _indices(indices),
     _hbrMesh(NULL)
 {
 
 }
 */
 
-OpenSubdivShape::OpenSubdivShape(
-    string name,
-    int numVertices,
-    int maxLevels,
-    vector<int> indices,
-    vector<int> nverts,
-    vector<string> vvNames,
-    vector<string> fvNames,
-    const vector<float>& fvData,
-    tag& tagData,
-    Scheme scheme) :
-    _scheme(scheme),    
-    _vvNames(vvNames),
-    _fvNames(fvNames),
+OpenSubdivShape::OpenSubdivShape():
+    _scheme(kCatmark),
     _hbrMesh(NULL),
     _farMesh(NULL),
     _computeContext(NULL),
+    _computeController(NULL),
     _vertexBuffer(NULL),
-    _vvBuffer(NULL)
+    _vvBuffer(NULL),
+    _firstVertexOffset(0),
+    _numRefinedVerts(0),
+    _numRefinedQuads(0),    
+    _refinedLevel(0),
+    _maxLevels(0)
+{
+}
+
+
+bool
+OpenSubdivShape::Initialize(
+    int numVertices,
+    const int *nverts, int numFaces,
+    const int *indices, int indicesLen,
+    int maxLevels,
+    string *errorMessage)
 {
 
-    HbrSubdivision<OsdVertex> *schemeToUse = NULL;
+    std::vector<int> nvertsVec, indicesVec;
+    nvertsVec.resize(numFaces);
+    for (int i=0; i<(int)nvertsVec.size(); ++i) {
+        nvertsVec[i] = nverts[i];
+    }
+    indicesVec.resize(indicesLen);    
+    for (int i=0; i<(int)indicesVec.size(); ++i) {
+        indicesVec[i] = indices[i];
+    }    
+
+    return Initialize("test", numVertices, maxLevels, nvertsVec, indicesVec,
+                      vector<string>(), vector<string>(), vector<float>(), tag(),
+                      kCatmark, errorMessage);
+}
     
+
+
+bool
+OpenSubdivShape::Initialize(
+    const string &name,
+    int numVertices,
+    int maxLevels,
+    const vector<int> &nverts,
+    const vector<int> &indices,
+    const vector<string> &vvNames,
+    const vector<string> &fvNames,
+    const vector<float>& fvData,
+    const tag& tagData,
+    Scheme scheme,
+    std::string *errorMessage)
+{
+
+    // Check the polygonal topology for errors before copying 
+    int totalNumIndices=0;
+    for (int i=0; i<(int)nverts.size(); ++i) {
+        totalNumIndices += nverts[i];
+    }
+
+    if (totalNumIndices != (int)indices.size()) {
+        if (errorMessage)
+            *errorMessage = "Bad indexing for face topology";
+        return false;
+    }
+
+    // nverts is OK
+    _nverts = nverts;
+
+    for (int i=0; i<(int)indices.size(); ++i) {
+        if ((indices[i] < 0) or (indices[i] >= numVertices)) {
+            if (errorMessage)            
+                *errorMessage = "Bad index in face topology";
+            _nverts.clear();
+            return false;
+        } 
+    }
+
+    // indices is OK, copy the rest of the data and begin
+    // initalization
+    _indices = indices;
+    _scheme = scheme;
+    _vvNames = vvNames;
+    _fvNames = fvNames;
+    _maxLevels = maxLevels;
+
+    // Decide on a subdivision scheme
+    HbrSubdivision<OsdVertex> *schemeToUse = NULL;
     static HbrBilinearSubdivision<OsdVertex> _bilinear;
     static HbrLoopSubdivision<OsdVertex>     _loop;
     static HbrCatmarkSubdivision<OsdVertex>  _catmark;
@@ -188,6 +257,7 @@ OpenSubdivShape::OpenSubdivShape(
     for (int i = 0; i < numVertices; ++i) {
         HbrVertex<OsdVertex>* hvert = _hbrMesh->NewVertex(i, v);
         if (!hvert) {
+        if (errorMessage)            
             printf("Unable to create OSD vertex from tidscene");
         }
     }
@@ -196,6 +266,7 @@ OpenSubdivShape::OpenSubdivShape(
     int fvarWidth = _hbrMesh->GetTotalFVarWidth();
     if (fvData.size() < nverts.size() * fvarWidth ||
         fvarWidth != (int)fvNames.size()) {
+        if (errorMessage)        
         printf("Incorrectly sized face data: name count = %d, "
                        "data width = %d, face count = %d, total data size = %d.",
                        (int) fvNames.size(),
@@ -205,14 +276,15 @@ OpenSubdivShape::OpenSubdivShape(
     }
 
     // Create faces
-    const int * fv=&(_faceverts[0]);
+    const int * fv=&(_indices[0]);
     // face-vertex count offset
     int fvcOffset = 0;    
     for(int f=0, ptxidx=0;f< GetNfaces(); f++ ) {
 
-        int nv = _nvertsPerFace[f];
+        int nv = _nverts[f];
 
         if ((_scheme==kLoop) and (nv!=3)) {
+        if (errorMessage)            
             printf("Trying to create a Loop surbd with non-triangle face\n");
             exit(1);
         }
@@ -223,21 +295,25 @@ OpenSubdivShape::OpenSubdivShape(
             HbrHalfedge<OsdVertex> * opposite  = destination->GetEdge(origin);
 
             if(origin==NULL || destination==NULL) {
+        if (errorMessage)                
                 printf(" An edge was specified that connected a nonexistent vertex\n");
                 exit(1);
             }
 
             if(origin == destination) {
+        if (errorMessage)                
                 printf(" An edge was specified that connected a vertex to itself\n");
                 exit(1);
             }
 
             if(opposite && opposite->GetOpposite() ) {
+        if (errorMessage)                
                 printf(" A non-manifold edge incident to more than 2 faces was found\n");
                 exit(1);
             }
 
             if(origin->GetEdge(destination)) {
+        if (errorMessage)                
                 printf(" An edge connecting two vertices was specified more than once."
                        " It's likely that an incident face was flipped\n");
                 exit(1);
@@ -249,6 +325,7 @@ OpenSubdivShape::OpenSubdivShape(
         face->SetPtexIndex(ptxidx);
 
         if (!face) {
+        if (errorMessage)            
             printf("Unable to create OSD face from tidscene");
             exit(1);
         }
@@ -304,6 +381,10 @@ OpenSubdivShape::OpenSubdivShape(
         _vvBuffer = OsdCpuVertexBuffer::Create(
             vvNames.size(), _farMesh->GetNumVertices());
     }
+
+    _computeController = new OpenSubdiv::OsdCpuComputeController();
+
+    return true;
 }
 
 void
@@ -372,43 +453,134 @@ OpenSubdivShape::GetFVData(
 }
 
 
-OpenSubdivShape::OpenSubdivShape(const float* points,
-                                 int pointsLen /*= # of 3-float points*/, 
-                                 const int *nvertsPerFace, int numFaces,
-                                 const int *faceverts, int facevertsLen)
+bool
+OpenSubdivShape::Refine(int level, int upperLimit, string *errorMessage)
 {
-    _verts.resize(pointsLen*3);
-    for (int i=0; i<pointsLen*3; ++i) {
-        _verts[i]= points[i];
-    }
+  if (level > _maxLevels) {
+      printf("Refinement level exceeds the maximum.");
+      return false;
+  }   
+
+    _computeController->Refine(_computeContext,
+                               _farMesh->GetKernelBatches(),
+                               _vertexBuffer,        
+                               _vvBuffer);   
     
-    _nvertsPerFace.resize(numFaces);
-    int totalNumFaceVerts=0;
-    for (int i=0; i<numFaces; ++i) {
-        _nvertsPerFace[i] = nvertsPerFace[i];
-        totalNumFaceVerts += nvertsPerFace[i];
-    }
-
-    if (totalNumFaceVerts != facevertsLen) {
-        // XXX real error needed
-        printf("Bad mesh passed to OpenSubdivShape\n");
-        _verts.clear();
-        _nvertsPerFace.clear();
-        return;
-    }
-
-    _faceverts.resize(totalNumFaceVerts);
-    int badIndices=0;
-    for (int i=0; i<facevertsLen; ++i) {
-        if (faceverts[i] >= pointsLen) {
-            badIndices++;
-            _faceverts[i] = 0;
-        } else {
-            _faceverts[i] = faceverts[i];
+    // Find a subdivision level that is less dense than the upper limit:
+    const FarSubdivisionTables<OsdVertex>* ftable = _farMesh->GetSubdivisionTables();
+    _refinedLevel = level;
+    while (_refinedLevel > 0) {
+        // GetNumVertices() returns number of vertices at a given level.
+        // GetNumVerticesTotal() returns total number of vertices at
+        //   a given level including lower levels.
+        int levelSize = ftable->GetNumVertices(_refinedLevel);
+        if (levelSize < upperLimit) {
+            break;
         }
+        _refinedLevel--;
     }
-}
+
+    // Check if we can't can squeeze it into the upper bound:
+    if (_refinedLevel == 0) {
+        printf("Upper limit on vertex density is too small\n");
+        return false;
+    }       
     
+    // Find quads array at _refinedLevel
+    const FarPatchTables * ptables = _farMesh->GetPatchTables();
+    const FarPatchTables::PatchArrayVector & parrays = ptables->GetPatchArrayVector();
+    if (_refinedLevel > (int)parrays.size()) {
+        printf("Invalid size of patch array %d %d\n", _refinedLevel, (int)parrays.size());;
+        return false;
+    }
+
+    // parrays doesn't contain base mesh, so it starts with level==1
+    const FarPatchTables::PatchArray & parray = parrays[_refinedLevel-1];
+
+    // Populate the metadata for the aggregate API:
+    _firstVertexOffset = ftable->GetFirstVertexOffset(_refinedLevel);
+    _numRefinedQuads = (int) parray.GetNumPatches();
+    _numRefinedVerts = (int) ftable->GetNumVertices(_refinedLevel);
+
+    
+    // Keep track of the float offsets for this mesh, for all UV data.
+    /*
+    int numVVFloats = 0;
+    TF_FOR_ALL(it, _vvNames) {
+        string name = *it;
+        meta["vv_offset_" + name] = numVVFloats;
+        numVVFloats++;
+    }
+    TF_FOR_ALL(it, _vvNames) {
+        string name = *it;
+        meta["vv_stride_" + name] = numVVFloats;
+    }
+    int numFVFloats = 0;
+    TF_FOR_ALL(it, _fvNames) {
+        string name = *it;
+        meta["fv_offset_" + name] = numVVFloats;
+        numFVFloats++;
+    }
+    TF_FOR_ALL(it, _fvNames) {
+        string name = *it;
+        meta["fv_stride_" + name] = numVVFloats;
+    }
+    
+    _numRefinedQuads += meta["quadsCount"].Get<int>();
+    _numRefinedVerts += meta["vertsCount"].Get<int>();
+    */
+    return true;
+}
+
+
+
+
+bool
+OpenSubdivShape::GetPositions(vector<float>* coords,
+                              string *errorMessage)
+{
+    if (!coords || (_numRefinedVerts == 0)) {
+        return false;
+    }
+    
+    coords->resize(_numRefinedVerts * 3); // 3 floats/point
+    const float* cBegin = _vertexBuffer->BindCpuBuffer();
+    for (int i=0; i<_numRefinedVerts; ++i) {
+        (*coords)[i] = cBegin[i + _firstVertexOffset];
+    }
+
+    return true;
+}
+
+
+bool
+OpenSubdivShape::GetQuads(vector<int>* quads,
+                          string *errorMessage)
+{
+    if (!quads || (_numRefinedQuads == 0)) {
+        return false;
+    }
+    
+    quads->resize(_numRefinedQuads * 4);
+
+    const FarPatchTables * ptables = _farMesh->GetPatchTables();
+    const FarPatchTables::PatchArrayVector & parrays = ptables->GetPatchArrayVector();
+    if (_refinedLevel > (int)parrays.size()) {
+        printf("Invalid size of patch array\n");
+        return false;
+        
+    }
+    const FarPatchTables::PatchArray & parray = parrays[_refinedLevel-1];
+
+    const unsigned int *pQuads = &ptables->GetPatchTable()[parray.GetVertIndex()];
+    size_t numInts = parray.GetNumPatches() * 4;
+    for (int i=0; i<(int)numInts; ++i) {
+        (*quads)[i] = pQuads[i] - _firstVertexOffset;
+    }
+
+    return true;
+}
+
 
 //------------------------------------------------------------------------------
 OpenSubdivShape::~OpenSubdivShape() {
@@ -471,7 +643,7 @@ OpenSubdivShape::_ProcessTagsAndFinishMesh(
                 break;
             default:
                 printf("Subdivmesh contains unknown interpolate boundary method: %d\n",
-                        currentInt[0]);
+                       currentInt[0]);
 		break;
 	    }
 	    // Processing of this tag is done in mesh->Finish()
@@ -584,11 +756,11 @@ std::string OpenSubdivShape::genRIB() const {
     rib << "HierarchicalSubdivisionMesh \"catmull-clark\" ";
     
     rib << "[";
-    std::copy(_nvertsPerFace.begin(), _nvertsPerFace.end(), std::ostream_iterator<int>(rib));
+    std::copy(_nverts.begin(), _nverts.end(), std::ostream_iterator<int>(rib));
     rib << "] ";
 
     rib << "[";
-    std::copy(_faceverts.begin(), _faceverts.end(), std::ostream_iterator<int>(rib));
+    std::copy(_indices.begin(), _indices.end(), std::ostream_iterator<int>(rib));
     rib << "] ";
     
     std::stringstream names, nargs, intargs, floatargs, strargs;

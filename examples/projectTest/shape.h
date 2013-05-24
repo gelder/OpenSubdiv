@@ -75,7 +75,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
-
+ 
 
 
 //------------------------------------------------------------------------------
@@ -102,37 +102,49 @@ class OpenSubdivShape {
     };
 
 
-    OpenSubdivShape(
-        std::string name,
+    OpenSubdivShape();
+
+
+    // returns false on error.  If errorMessage is non-NULL it'll
+    // be populated upon error.
+    bool Initialize(
+        const std::string &name,
         int numVertices,
         int maxLevels,
-        std::vector<int> indices,
-        std::vector<int> nverts,
-        std::vector<std::string> vvNames,
-        std::vector<std::string> fvNames,
-        const std::vector<float>& fvData,
-        tag& tagData,
-        Scheme scheme);
+        const std::vector<int> &nverts,        
+        const std::vector<int> &indices,
+        const std::vector<std::string> &vvNames,
+        const std::vector<std::string> &fvNames,
+        const std::vector<float> &fvData,
+        const tag& tagData,
+        Scheme scheme,
+        std::string *errorMessage = NULL);
 
 
-    // Constructor using raw types.
+
+    // Initialize using raw types. 
     //
-    OpenSubdivShape(const float* points,
-                    int pointsLen /*= # of 3-float points*/, 
-                    const int *nvertsPerFace, int numFaces,
-                    const int *faceverts, int facevertsLen);
-
+    // This is useful for automated tests initializing with data like:
+    // int nverts[] = { 4, 4, 4, 4, 4, 4};
+    //
+    bool Initialize(
+        int numVertices,
+        const int *nverts, int numFaces,
+        const int *indices, int indicesLen,
+        int maxLevels,
+        std::string *errorMessage = NULL);
+    
     std::string genRIB() const;
 
     ~OpenSubdivShape();
 
     int GetNverts() const { return (int)_verts.size()/3; }
 
-    int GetNfaces() const { return (int)_nvertsPerFace.size(); }
+    int GetNfaces() const { return (int)_nverts.size(); }
 
     const std::vector<float>  &GetVerts() { return _verts;}
-    const std::vector<int>    &GetNVertsPerFace() { return _nvertsPerFace;}
-    const std::vector<int>    &GetFaceVerts() { return _faceverts;}
+    const std::vector<int>    &GetNVerts() { return _nverts;}
+    const std::vector<int>    &GetIndices() { return _indices;}
     const std::vector<tag *>  &GetTags() { return _tags;}
     
     Scheme                    &GetScheme() { return _scheme;}
@@ -142,11 +154,31 @@ class OpenSubdivShape {
     void GetFVData(int subdivisionLevel,
                    const std::vector<std::string>& names,
                    std::vector<float>* fvdata);
+
     
+    /*! The Refine method uses OpenSubdiv to refine all subdiv nodes in the held
+     *  tidscene and cache the results.
+     *
+     *  If an upperLimit is set, this halts subdivision of each gprim so that
+     *  the number of vertices never exceeds it.  This feature is useful
+     *  for renderers like OpenGL ES that only support 16-bit indices.
+     */
+    bool Refine(int levels, int upperLimit = (int)0x7fffffff,
+                std::string *errorMessage = NULL);
+
+    /*! Fetch the XYZ coordinates of the post-refined vertices. */
+    bool GetPositions(std::vector<float>* positions,
+                      std::string *errorMessage = NULL);
+
+    /*! Fetch the topology of the post-refined mesh. */
+    bool GetQuads(std::vector<int>* quads,
+                  std::string *errorMessage = NULL);
+
+
+private:
     
   private:
-
-
+    
     void _ProcessTagsAndFinishMesh(
         OpenSubdiv::HbrMesh<OpenSubdiv::OsdVertex> *mesh,
         std::vector<std::string> &tags,
@@ -161,11 +193,11 @@ class OpenSubdivShape {
 
     // A vector with one entry for every face (length = number of faces) in
     // the coarse mesh. Each entry is the number of verts in that face
-    std::vector<int>    _nvertsPerFace;
+    std::vector<int>    _nverts;
 
     // Index for each point in each face into vertex buffers.  The
-    // length is the sum of all the entries in nvertsPerFace
-    std::vector<int>    _faceverts;
+    // length is the sum of all the entries in nverts
+    std::vector<int>    _indices;
 
     // Annotation on the coarse mesh for things like creases. 
     std::vector<tag *>  _tags;
@@ -196,12 +228,22 @@ class OpenSubdivShape {
     // by performing feature adaptive or uniform subdivision on the hbrMesh
     OpenSubdiv::FarMesh<OpenSubdiv::OsdVertex>*  _farMesh;
 
-    // An object used to compute values based on the farMesh
+    // Objects used to compute values based on the farMesh
     OpenSubdiv::OsdCpuComputeContext*            _computeContext;
+    OpenSubdiv::OsdCpuComputeController*         _computeController;
 
     // Two buffers used to store computed values
     OpenSubdiv::OsdCpuVertexBuffer*              _vertexBuffer;
     OpenSubdiv::OsdCpuVertexBuffer*              _vvBuffer;
+
+
+
+    int _firstVertexOffset;
+    int _numRefinedVerts;
+    int _numRefinedQuads;
+    int _refinedLevel;
+    int _maxLevels;
+
 };
 
 

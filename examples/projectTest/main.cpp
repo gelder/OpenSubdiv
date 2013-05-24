@@ -124,82 +124,66 @@ createOsdMesh(int level)
                        0.000000, -1.414214, -1.000000,
                        1.414214, 0.000000, -1.000000};
 
-    int nvertsPerFace[] = { 4, 4, 4, 4, 4, 4};
+    int nverts[] = { 4, 4, 4, 4, 4, 4};
 
-    int faceverts[] = { 1, 2, 4, 3,
-                        3, 4, 6, 5,
-                        5, 6, 8, 7,
-                        7, 8, 2, 1,
-                        2, 8, 6, 4,
-                        7, 1, 3, 5};
+    int indices[] = { 0, 1, 3, 2,
+                      2, 3, 5, 4,
+                      4, 5, 7, 6,
+                      6, 7, 1, 0,
+                      1, 7, 5, 3,
+                      6, 0, 2, 4};
     
 
 //    Scheme scheme = kCatmark;
 
-    
-    OpenSubdivShape shape(points, sizeof(points)/(3*sizeof(float)),
-                          nvertsPerFace, sizeof(nvertsPerFace)/sizeof(int),
-                          faceverts, sizeof(faceverts)/sizeof(int));
+    int numVertices = sizeof(points)/(3*sizeof(float));
+    OpenSubdivShape *shape = new OpenSubdivShape();
+    std::string errorMessage;
+    if (not shape->Initialize(numVertices, 
+                              nverts, sizeof(nverts)/sizeof(int),
+                              indices, sizeof(indices)/sizeof(int), 2,
+                              &errorMessage)) {
+        std::cout  << "Shape initialization failed with " << errorMessage << std::endl;
+    }
 
-#ifdef NOT_YET    
-    OsdHbrMesh *hmesh = shape.GetHbrMesh();
-    
-    std::cout << "Made the shape\n";
 
-    g_positions.resize(g_orgPositions.size(),0.0f);
-
-    int nfaces = hmesh->GetNumFaces(),
-        nptexfaces = GetNumPtexFaces(hmesh, nfaces);
-    
-    // Create FAR mesh
-    OsdFarMeshFactory factory( hmesh, level, /*adaptive*/ true);    
-    
-    delete g_fmesh;
-    g_fmesh = factory.Create( /*ptex*/ true, /*fvar*/ false);
-    
-    int nverts = g_fmesh->GetNumVertices();
-    
-
-    
-    // Create v-buffer & populate w/ positions
-    delete g_samplesVB;
-    g_samplesVB = OsdCpuVertexBuffer::Create(3, nverts);
-
+    // Push the vertex data:
+    std::vector<float> pointsVec;
+    pointsVec.resize(sizeof(points));
+    for (int i=0; i<(int)sizeof(points); ++i) {
+        pointsVec[i] = points[i];
         
-    // Create a Compute context, used to "pose" the vertices
-    delete g_computeCtx;
-    g_computeCtx = OsdCpuComputeContext::Create(g_fmesh);
-    
-    g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_samplesVB );
+    }
+    shape->SetCoarsePositions(pointsVec);
 
-    
-    // Create eval context & data buffers
-    delete g_evalCtx;
-    g_evalCtx = OsdCpuEvalLimitContext::Create(g_fmesh);
+    std::vector<float> refinedPositions;
+    std::vector<int> refinedQuads;
 
-    delete g_Q;
-    g_Q = OsdCpuGLVertexBuffer::Create(6,nsamples);
-
-    delete g_dQu;
-    g_dQu = OsdCpuGLVertexBuffer::Create(6,nsamples);
-
-    delete g_dQv;
-    g_dQv = OsdCpuGLVertexBuffer::Create(6,nsamples);
+    if (not (shape->Refine(2)                                      and
+             shape->GetPositions(&refinedPositions, &errorMessage) and
+             shape->GetQuads(&refinedQuads, &errorMessage))) {
+        std::cout << errorMessage << std::endl;
+    } else {
+        std::cout << "Hot damn, it worked.\n";
+        for (int i=0; i<(int)refinedPositions.size(); i+=3)  {
+            std::cout << "(" << refinedPositions[i] <<
+                ", " << refinedPositions[i+1] <<
+                "," << refinedPositions[i+2] << ")\n";
+        }
+        for (int i=0; i<(int)refinedQuads.size(); i+=4)  {
+            std::cout << "(" << refinedQuads[i] <<
+                ", " << refinedQuads[i+1] <<
+                "," << refinedQuads[i+2] << ")\n";
+        }
         
-    updateGeom();
-
-    // Bind g_Q as a GL_POINTS VBO
-    glBindVertexArray(g_samplesVAO);
+    }
+         
     
-    glBindBuffer(GL_ARRAY_BUFFER, g_Q->BindVBO());
+        
+    
+//    coarseMesh->SetVVData(vvInterleaved);
 
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, 0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 6, (float*)12);
-
-    glBindVertexArray(0);
-#endif
+    
 }
 
 //------------------------------------------------------------------------------
