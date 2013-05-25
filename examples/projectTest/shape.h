@@ -156,23 +156,27 @@ class OpenSubdivShape {
                    std::vector<float>* fvdata);
 
     
-    /*! The Refine method uses OpenSubdiv to refine all subdiv nodes in the held
-     *  tidscene and cache the results.
-     *
-     *  If an upperLimit is set, this halts subdivision of each gprim so that
-     *  the number of vertices never exceeds it.  This feature is useful
-     *  for renderers like OpenGL ES that only support 16-bit indices.
-     */
+    // The Refine method uses OpenSubdiv to refine all subdiv nodes in the held
+    //  tidscene and cache the results.
+    //
+    //  If an upperLimit is set, this halts subdivision of each gprim so that
+    //  the number of vertices never exceeds it.  This feature is useful
+    //  for renderers like OpenGL ES that only support 16-bit indices.
+    //
     bool Refine(int levels, int upperLimit = (int)0x7fffffff,
                 std::string *errorMessage = NULL);
 
-    /*! Fetch the XYZ coordinates of the post-refined vertices. */
+    // Fetch the XYZ coordinates of the post-refined vertices. 
     bool GetPositions(std::vector<float>* positions,
                       std::string *errorMessage = NULL);
 
-    /*! Fetch the topology of the post-refined mesh. */
+    // Fetch the topology of the post-refined mesh. 
     bool GetQuads(std::vector<int>* quads,
                   std::string *errorMessage = NULL);
+
+    // Write the refined quad mesh to given filename, return false on error
+    bool WriteRefinedObj( const std::string &filename,
+                          std::string *errorMessage = NULL);
 
 
 private:

@@ -165,17 +165,25 @@ createOsdMesh(int level)
         std::cout << errorMessage << std::endl;
     } else {
         std::cout << "Hot damn, it worked.\n";
+        std::cout << "Positions = " << refinedPositions.size()/3 << std::endl;
         for (int i=0; i<(int)refinedPositions.size(); i+=3)  {
             std::cout << "(" << refinedPositions[i] <<
                 ", " << refinedPositions[i+1] <<
                 "," << refinedPositions[i+2] << ")\n";
         }
+
+        std::cout << "Quads = " << refinedQuads.size()/4 << std::endl;        
         for (int i=0; i<(int)refinedQuads.size(); i+=4)  {
             std::cout << "(" << refinedQuads[i] <<
                 ", " << refinedQuads[i+1] <<
-                "," << refinedQuads[i+2] << ")\n";
+                ", " << refinedQuads[i+2] <<
+                ", " << refinedQuads[i+3] <<
+                ")\n";
         }
-        
+
+        if (not shape->WriteRefinedObj("foo.obj", &errorMessage)) {
+            std::cout << errorMessage << std::endl;             
+        }
     }
          
     

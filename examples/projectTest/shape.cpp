@@ -69,43 +69,10 @@
 #include <far/meshFactory.h>
 #include <osd/vertex.h>
 
+#include <fstream>
+
 using namespace OpenSubdiv;
 using namespace std;
-
-//------------------------------------------------------------------------------
-template <class T> std::string   
-hbrToObj( HbrMesh<T> * mesh ) {
-
-    std::stringstream sh;
-
-    sh<<"# This file uses centimeters as units for non-parametric coordinates.\n\n";
-    
-    int nv = mesh->GetNumVertices();
-    for (int i=0; i<nv; ++i) {
-       const float * pos = mesh->GetVertex(i)->GetData().GetPos();
-       sh << "v " << pos[0] << " " << pos[1] << " " << pos[2] <<"\n";
-    }
-    
-    int nf = mesh->GetNumFaces();
-    for (int i=0; i<nf; ++i) {
-    
-        sh << "f ";
-        
-        HbrFace<T> * f = mesh->GetFace(i);
-        
-        for (int j=0; j<f->GetNumVertices(); ++j) {
-            int vert = f->GetVertex(j)->GetID()+1;
-            sh << vert << "/" << vert << "/" << vert << " ";
-        }
-        sh << "\n";
-    }
-
-    sh << "\n";
-
-    return sh.str();
-}
-
-
 
 
 //------------------------------------------------------------------------------
@@ -367,8 +334,9 @@ OpenSubdivShape::Initialize(
 //        _hbrMesh, tagData.tags, tagData.numArgs, tagData.intargs,
 //        tagData.floatargs, tagData.stringargs);
     _hbrMesh->Finish();
-        
-    FarMeshFactory<OsdVertex> meshFactory(_hbrMesh, maxLevels, false);
+    
+    // create the quad tables to include all levels by specifying firstLevel as 1
+    FarMeshFactory<OsdVertex> meshFactory(_hbrMesh, maxLevels, false, /*firstLevel=*/1);
 
     _farMesh = meshFactory.Create();
     _computeContext = OsdCpuComputeContext::Create(_farMesh);
@@ -480,6 +448,8 @@ OpenSubdivShape::Refine(int level, int upperLimit, string *errorMessage)
         _refinedLevel--;
     }
 
+    std::cout << "_refinedLevel = " << _refinedLevel << endl;
+    
     // Check if we can't can squeeze it into the upper bound:
     if (_refinedLevel == 0) {
         printf("Upper limit on vertex density is too small\n");
@@ -499,10 +469,11 @@ OpenSubdivShape::Refine(int level, int upperLimit, string *errorMessage)
 
     // Populate the metadata for the aggregate API:
     _firstVertexOffset = ftable->GetFirstVertexOffset(_refinedLevel);
+    std::cout << "_firstVertexOffset = " << _firstVertexOffset << endl;
+    
     _numRefinedQuads = (int) parray.GetNumPatches();
     _numRefinedVerts = (int) ftable->GetNumVertices(_refinedLevel);
 
-    
     // Keep track of the float offsets for this mesh, for all UV data.
     /*
     int numVVFloats = 0;
@@ -545,8 +516,8 @@ OpenSubdivShape::GetPositions(vector<float>* coords,
     
     coords->resize(_numRefinedVerts * 3); // 3 floats/point
     const float* cBegin = _vertexBuffer->BindCpuBuffer();
-    for (int i=0; i<_numRefinedVerts; ++i) {
-        (*coords)[i] = cBegin[i + _firstVertexOffset];
+    for (int i=0; i<_numRefinedVerts*3; ++i) {
+        (*coords)[i] = cBegin[i + (_firstVertexOffset*3)];
     }
 
     return true;
@@ -580,6 +551,56 @@ OpenSubdivShape::GetQuads(vector<int>* quads,
 
     return true;
 }
+
+
+bool
+OpenSubdivShape::WriteRefinedObj( const std::string &filename,
+                                std::string *errorMessage)
+{
+
+    // open a file stream
+    std::ofstream fout(filename.c_str());
+    if (!fout.is_open()) {
+        if (errorMessage)
+            printf("Could not open file: (%s)\n", filename.c_str());
+        return false;
+    }
+
+
+    std::vector<float> refinedPositions;
+    std::vector<int> refinedQuads;
+    if (not (GetPositions(&refinedPositions, errorMessage) and
+             GetQuads(&refinedQuads, errorMessage))) {
+        return false;
+    }
+    
+    fout << "# Exported by OpenSubdivShape\n";
+
+    fout << "#Positions = " << refinedPositions.size()/3 << std::endl;        
+    for (int i=0; i<(int)refinedPositions.size(); i+=3)  {
+        fout << "v " << refinedPositions[i] <<
+            " " << refinedPositions[i+1] <<
+            " " << refinedPositions[i+2] << "\n";               
+    }
+
+    fout << "# Quads = " << refinedQuads.size()/4 << std::endl;        
+    for (int i=0; i<(int)refinedQuads.size(); i+=4)  {
+        // OBJ face indices are 1 based
+        fout << "f " << refinedQuads[i]+1 <<
+            " " << refinedQuads[i+1]+1 <<
+            " " << refinedQuads[i+2]+1 <<
+            " " << refinedQuads[i+3]+1 <<
+            "\n";
+    }
+
+
+    fout.close();
+    
+    return true;
+}
+
+
+
 
 
 //------------------------------------------------------------------------------
