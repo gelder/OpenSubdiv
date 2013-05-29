@@ -474,9 +474,11 @@ evalGregory(float u, float v,
         
         rp=r+vid*maxValence*length;
         
+        int vofs = vid*length;
+        
         for (int i=0; i<valence; ++i) {
-            int im = (i+valence-1)%valence;
-            int ip = (i+1)%valence;
+            unsigned int im = (i+valence-1)%valence,
+                         ip = (i+1)%valence;
             
             int idx_neighbor   = valenceTable[2*i  + 0 + 1];
             int idx_diagonal   = valenceTable[2*i  + 1 + 1];
@@ -495,13 +497,11 @@ evalGregory(float u, float v,
             for (int k=0; k<length; ++k) {
                 fp[k] = (pos[k]*float(valence) + (neighbor_p[k]+neighbor[k])*2.0f + diagonal[k])/(float(valence)+5.0f);
                 
-                opos[vid*length+k] += fp[k];
+                opos[vofs+k] += fp[k];
                 rp[i*length+k] =(neighbor_p[k]-neighbor_m[k])/3.0f + (diagonal[k]-diagonal_m[k])/6.0f;
             }
             
         }
-        
-        int vofs = vid*length;
         
         for (int k=0; k<length; ++k) {
             opos[vofs+k] /= valence;
@@ -562,7 +562,7 @@ evalGregory(float u, float v,
 
         int start = quadOffsets[vid] & 0x00ff;
         int prev = (quadOffsets[vid] & 0xff00) / 256;
-        
+
         for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
         
             Ep[ofs] = opos[ofs] + e0[ofs] * csf(n-3, 2*start) + e1[ofs]*csf(n-3, 2*start +1);
@@ -720,12 +720,13 @@ evalGregoryBoundary(float u, float v,
 
         const int *valenceTable = vertexValenceBuffer + vertexID * (2*maxValence+1);
         int valence = *valenceTable,
-            ivalence = valence < 0 ? -valence : valence;
+            ivalence = abs(valence);
+
         assert(ivalence<=maxValence);
         valences[vid] = valence;
 
-        float *Q=org + vid*inDesc.stride;
-        memcpy(Q, inOffset + vertexID*inDesc.stride, length*sizeof(float));
+        float *pos=org + vid*inDesc.stride;
+        memcpy(pos, inOffset + vertexID*inDesc.stride, length*sizeof(float));
 
         int boundaryEdgeNeighbors[2];
         unsigned int currNeighbor = 0,
@@ -734,9 +735,11 @@ evalGregoryBoundary(float u, float v,
 
         rp=r+vid*maxValence*length;
 
+        int vofs = vid * length;
+
         for (int i=0; i<ivalence; ++i) {
-            int im = (i+ivalence-1)%ivalence;
-            int ip = (i+1)%ivalence;
+            unsigned int im = (i+ivalence-1)%ivalence,
+                         ip = (i+1)%ivalence;
 
             bool isBoundaryNeighbor = false;
 
@@ -772,17 +775,15 @@ evalGregoryBoundary(float u, float v,
             float *fp = f+i*length;
 
             for (int k=0; k<length; ++k) {
-                fp[k] = (Q[k]*float(ivalence) + (neighbor_p[k]+neighbor[k])*2.0f + diagonal[k])/(float(ivalence)+5.0f);
+                fp[k] = (pos[k]*float(ivalence) + (neighbor_p[k]+neighbor[k])*2.0f + diagonal[k])/(float(ivalence)+5.0f);
 
-                opos[vid*length+k] += fp[k];
+                opos[vofs+k] += fp[k];
                 rp[i*length+k] =(neighbor_p[k]-neighbor_m[k])/3.0f + (diagonal[k]-diagonal_m[k])/6.0f;
             }
         }
         
-        int vofs =  vid*length;
-
         for (int k=0; k<length; ++k) {
-            opos[vofs+k] /= valence;
+            opos[vofs+k] /= ivalence;
         }
 
         zerothNeighbors[vid] = zerothNeighbor;
@@ -791,70 +792,70 @@ evalGregoryBoundary(float u, float v,
             boundaryEdgeNeighbors[1] = boundaryEdgeNeighbors[0];
         }
 
-        for (int i=0; i<valence; ++i) {
-            int im = (i+ivalence-1)%valence;
+        for (int i=0; i<ivalence; ++i) {
+            unsigned int im = (i+ivalence-1)%ivalence;
             for (int k=0; k<length; ++k) {
                 float e = 0.5f*(f[i*length+k]+f[im*length+k]);
-                e0[vofs+k] += csf(valence-3, 2*i) * e;
-                e1[vofs+k] += csf(valence-3, 2*i+1) * e;
+                e0[vofs+k] += csf(ivalence-3, 2*i) * e;
+                e1[vofs+k] += csf(ivalence-3, 2*i+1) * e;
             }
         }
 
         for (int k=0; k<length; ++k) {
-            e0[vofs+k] *= ef_small[valence-3];
-            e1[vofs+k] *= ef_small[valence-3];
+            e0[vofs+k] *= ef_small[ivalence-3];
+            e1[vofs+k] *= ef_small[ivalence-3];
         }
 
         if (valence<0) {
-
             if (ivalence>2) {
-
-                float k = float(float(ivalence) - 1.0f);    //k is the number of faces
-                float c = cosf(float(M_PI)/k);
-                float s = sinf(float(M_PI)/k);
-                float gamma = -(4.0f*s)/(3.0f*k+c);
-                float alpha_0k = -((1.0f+2.0f*c)*sqrt(1.0f+c))/((3.0f*k+c)*sqrtf(1.0f-c));
-                float beta_0 = s/(3.0f*k + c);
-
-                int idx_diagonal = abs(valenceTable[2*zerothNeighbor + 1 + 1]);
-
-                float const * diagonal = inOffset + idx_diagonal * inDesc.stride;
-
                 for (int k=0; k<length; ++k) {
-                    opos[vid*length+k] = (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] + 
-                                          inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k] + 4.0f * Q[k])/6.0f;
-                    
-                    e0[vid*length+k] = (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] - 
-                                        inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k])/6.0f;
-
-                    e1[vid*length+k] = gamma * Q[k] + beta_0 * diagonal[k] +                    
-                                       (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] + 
-                                        inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k]) * alpha_0k;
-
+                    opos[vofs+k] = (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] + 
+                                          inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k] + 4.0f*pos[k])/6.0f;
                 }
-
-                for (int i=0; i<(ivalence-1); ++i) {
-                    unsigned int curri = ((i + zerothNeighbor)%ivalence);
-                    float alpha = (4.0f*sinf((float(M_PI) * float(i))/k))/(3.0f*k+c);
-                    float beta = (sinf((float(M_PI) * float(i))/k) + sinf((float(M_PI) * float(i+1))/k))/(3.0f*k+c);
-                   
-                    int idx_neighbor = abs(valenceTable[2*curri + 0 + 1]),
-                        ifx_diagonal = abs(valenceTable[2*curri + 1 + 1]);
-                        
-                    float const * neighbor = inOffset + idx_neighbor * inDesc.stride,
-                                * diagonal = inOffset + ifx_diagonal * inDesc.stride;
-                    
-                    for (int k=0; k<length; ++k) {
-                        e1[vid*length+k] += alpha*neighbor[k] + beta*diagonal[k];
-                    }
-                }
-                
-                for (int k=0; k<length; ++k) {
-                    e1[vid*length+k] /= 3.0;
-                }
-                
             } else {
-                memcpy(opos, Q, length*sizeof(float));
+                memcpy(opos, pos, length*sizeof(float));
+            }
+
+            float k = float(float(ivalence) - 1.0f);    //k is the number of faces
+            float c = cosf(float(M_PI)/k);
+            float s = sinf(float(M_PI)/k);
+            float gamma = -(4.0f*s)/(3.0f*k+c);
+            float alpha_0k = -((1.0f+2.0f*c)*sqrtf(1.0f+c))/((3.0f*k+c)*sqrtf(1.0f-c));
+            float beta_0 = s/(3.0f*k + c);
+
+            int idx_diagonal = valenceTable[2*zerothNeighbor + 1 + 1];
+            assert(idx_diagonal>0);
+            float const * diagonal = inOffset + idx_diagonal * inDesc.stride;
+
+            for (int k=0; k<length; ++k) {
+                e0[vofs+k] = (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] - 
+                              inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k])/6.0f;
+
+                e1[vofs+k] = gamma * pos[k] + beta_0 * diagonal[k] +                    
+                            (inOffset[boundaryEdgeNeighbors[0]*inDesc.stride+k] +
+                             inOffset[boundaryEdgeNeighbors[1]*inDesc.stride+k]) * alpha_0k;
+
+            }
+
+            for (int i=0; i<(ivalence-1); ++i) {
+                unsigned int curri = ((i + zerothNeighbor)%ivalence);
+                float alpha = (4.0f*sinf((float(M_PI) * float(i))/k))/(3.0f*k+c);
+                float beta = (sinf((float(M_PI) * float(i))/k) + sinf((float(M_PI) * float(i+1))/k))/(3.0f*k+c);
+
+                int idx_neighbor = valenceTable[2*curri + 0 + 1],
+                    idx_diagonal = valenceTable[2*curri + 1 + 1];
+                assert( idx_neighbor>0 and idx_diagonal>0 );
+                
+                float const * neighbor = inOffset + idx_neighbor * inDesc.stride,
+                            * diagonal = inOffset + idx_diagonal * inDesc.stride;
+
+                for (int k=0; k<length; ++k) {
+                    e1[vofs+k] += alpha*neighbor[k] + beta*diagonal[k];
+                }
+            }
+
+            for (int k=0; k<length; ++k) {
+                e1[vofs+k] /= 3.0;
             }
         }
     }
@@ -894,10 +895,12 @@ evalGregoryBoundary(float u, float v,
 
         int ip = (vid+1)%4,
             im = (vid+3)%4,
-            n = valences[vid],
-            ivalence = abs(n);
+            n = abs(valences[vid]),
+            ivalence = n;
 
         const unsigned int *quadOffsets = quadOffsetBuffer;
+
+        int vofs = vid * length;
 
         int start = quadOffsets[vid] & 0x00ff,
             prev = (quadOffsets[vid] & 0xff00) / 256,
@@ -911,15 +914,23 @@ evalGregoryBoundary(float u, float v,
               *Ep_im=(float*)alloca(length*sizeof(float));
 
         if (valences[ip]<-2) {
-            unsigned int jp = (np + prev_p - zerothNeighbors[vid]) % np,
-                         jm = (nm + start_m - zerothNeighbors[im]) % nm;
-            for (int k=0, ipofs=ip*length, imofs=im*length; k<length; ++k, ++ipofs, ++imofs) {
-                Em_ip[k] = opos[ipofs] + cosf((float(M_PI)*jp)/float(np-1))*e0[ipofs] + sinf((float(M_PI)*jp)/float(np-1))*e1[ipofs];
-                Ep_im[k] = opos[imofs] + cosf((float(M_PI)*jm)/float(nm-1))*e0[imofs] + sinf((float(M_PI)*jm)/float(nm-1))*e1[imofs];
+            unsigned int j = (np + prev_p - zerothNeighbors[ip]) % np;
+            for (int k=0, ipofs=ip*length; k<length; ++k, ++ipofs) {
+                Em_ip[k] = opos[ipofs] + cosf((float(M_PI)*j)/float(np-1))*e0[ipofs] + sinf((float(M_PI)*j)/float(np-1))*e1[ipofs];
             }
         } else {
-            for (int k=0, ipofs=ip*length, imofs=im*length; k<length; ++k, ++ipofs, ++imofs) {
+            for (int k=0, ipofs=ip*length; k<length; ++k, ++ipofs) {
                 Em_ip[k] = opos[ipofs] + e0[ipofs]*csf(np-3,2*prev_p)  + e1[ipofs]*csf(np-3,2*prev_p+1);
+            }
+        } 
+
+        if (valences[im]<-2) {
+            unsigned int j = (nm + start_m - zerothNeighbors[im]) % nm;
+            for (int k=0, imofs=im*length; k<length; ++k, ++imofs) {
+                Ep_im[k] = opos[imofs] + cosf((float(M_PI)*j)/float(nm-1))*e0[imofs] + sinf((float(M_PI)*j)/float(nm-1))*e1[imofs];
+            }
+        } else {
+            for (int k=0, imofs=im*length; k<length; ++k, ++imofs) {
                 Ep_im[k] = opos[imofs] + e0[imofs]*csf(nm-3,2*start_m) + e1[imofs]*csf(nm-3,2*start_m+1);
             }
         }
@@ -934,14 +945,14 @@ evalGregoryBoundary(float u, float v,
             np = (np-1)*2;
         }
 
-        rp = r + vid*maxValence*length;
+        rp=r+vid*maxValence*length;
 
         if (valences[vid] > 2) {
            float s1 = 3.0f - 2.0f*csf(n-3,2)-csf(np-3,2),
                  s2 = 2.0f*csf(n-3,2),
-                 s3 = 3.0f -2.0f*cos(2.0f*float(M_PI)/float(n)) - cos(2.0f*float(M_PI)/float(nm));
+                 s3 = 3.0f -2.0f*cosf(2.0f*float(M_PI)/float(n)) - cosf(2.0f*float(M_PI)/float(nm));
 
-            for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
+            for (int k=0, ofs=vofs; k<length; ++k, ++ofs) {
                 Ep[ofs] = opos[ofs] + e0[ofs] * csf(n-3, 2*start) + e1[ofs]*csf(n-3, 2*start +1);
                 Em[ofs] = opos[ofs] + e0[ofs] * csf(n-3, 2*prev ) + e1[ofs]*csf(n-3, 2*prev + 1);
                 Fp[ofs] = (csf(np-3,2)*opos[ofs] + s1*Ep[ofs] + s2*Em_ip[k] + rp[start*length+k])/3.0f;
@@ -951,47 +962,47 @@ evalGregoryBoundary(float u, float v,
             unsigned int jp = (ivalence + start - zerothNeighbors[vid]) % ivalence,
                          jm = (ivalence + prev  - zerothNeighbors[vid]) % ivalence;
 
-            for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
+            for (int k=0, ofs=vofs; k<length; ++k, ++ofs) {
                 Ep[ofs] = opos[ofs] + cosf((float(M_PI)*jp)/float(ivalence-1))*e0[ofs] + sinf((float(M_PI)*jp)/float(ivalence-1))*e1[ofs];
                 Em[ofs] = opos[ofs] + cosf((float(M_PI)*jm)/float(ivalence-1))*e0[ofs] + sinf((float(M_PI)*jm)/float(ivalence-1))*e1[ofs];
             }
 
-            float s2=2*csf(n-3,2),
-                  s3 = 3.0f-2.0f*cosf(2.0f*float(M_PI)/n)-cosf(2.0f*float(M_PI)/nm);
+            float s2=2*csf(n-3,2);
 
             if (valences[im]<0) {
                 float s1=3-2*csf(n-3,2)-csf(np-3,2);
-                for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
+                for (int k=0, ofs=vofs; k<length; ++k, ++ofs) {
                     Fp[ofs] = Fm[ofs] = (csf(np-3,2)*opos[ofs] + s1*Ep[ofs] + s2*Em_ip[k] + rp[start*length+k])/3.0f;
                 }
             } else if (valences[ip]<0) {
                 float s1 = 3.0f-2.0f*cosf(2.0f*float(M_PI)/n)-cosf(2.0f*float(M_PI)/nm);
-                for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
-                    Fm[ofs] = Fp[ofs] = (csf(np-3,2)*opos[ofs] + s1*Em[ofs] + s2*Ep_im[k] + rp[prev*length+k])/3.0f;
+                for (int k=0, ofs=vofs; k<length; ++k, ++ofs) {
+                    Fm[ofs] = Fp[ofs] = (csf(nm-3,2)*opos[ofs] + s1*Em[ofs] + s2*Ep_im[k] + rp[prev*length+k])/3.0f;
                 }
             } else {
-                float s1=3.0f-2.0f*cosf(2.0f*float(M_PI)/n)-cosf(2.0f*float(M_PI)/nm);
-                for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
+                float s1 = 3-2*csf(n-3,2)-csf(np-3,2),
+                      s3 = 3.0f-2.0f*cosf(2.0f*float(M_PI)/n)-cosf(2.0f*float(M_PI)/nm);
+                for (int k=0, ofs=vofs; k<length; ++k, ++ofs) {
                     Fp[ofs] = (csf(np-3,2)*opos[ofs] + s1*Ep[ofs] + s2*Em_ip[k] + rp[start*length+k])/3.0f;
                     Fm[ofs] = (csf(nm-3,2)*opos[ofs] + s3*Em[ofs] + s2*Ep_im[k] - rp[prev*length+k])/3.0f;
                 }
             }
         } else if (valences[vid]==-2) {
-            for (int k=0, ofs=vid*length; k<length; ++k, ++ofs) {
-                Ep[ofs] = (2.0f * org[vid*inDesc.stride] + org[ip*inDesc.stride])/3.0f;
-                Em[ofs] = (2.0f * org[vid*inDesc.stride] + org[im*inDesc.stride])/3.0f;
-                Fp[ofs] = Fm[ofs] = (4.0f * org[vid*inDesc.stride] + org[((vid+2)%n)*inDesc.stride] + 2.0f * org[ip*inDesc.stride] + 2.0f * org[im*inDesc.stride])/9.0f;
+            for (int k=0, ofs=vofs, ipofs=ip*length, imofs=im*length; k<length; ++k, ++ofs, ++ipofs, ++imofs) {
+                Ep[ofs] = (2.0f * org[ofs] + org[ipofs])/3.0f;
+                Em[ofs] = (2.0f * org[ofs] + org[imofs])/3.0f;
+                Fp[ofs] = Fm[ofs] = (4.0f * org[ofs] + org[((vid+2)%n)*inDesc.stride+k] + 2.0f * org[ipofs] + 2.0f * org[imofs])/9.0f;
             }
         }
     }
 
     float * p[20];    
-    for (int i=0, ofs=0; i<4; ++i, ofs+=length) {    
-        p[i*5+0] = opos + ofs;
-        p[i*5+1] =   Ep + ofs;
-        p[i*5+2] =   Em + ofs;
-        p[i*5+3] =   Fp + ofs;
-        p[i*5+4] =   Fm + ofs;
+    for (int vid=0, ofs=0; vid<4; ++vid, ofs+=length) {    
+        p[vid*5+0] = opos + ofs;
+        p[vid*5+1] =   Ep + ofs;
+        p[vid*5+2] =   Em + ofs;
+        p[vid*5+3] =   Fp + ofs;
+        p[vid*5+4] =   Fm + ofs;
     }    
 
     float U = 1-u, V=1-v;
