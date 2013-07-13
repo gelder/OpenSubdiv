@@ -80,12 +80,12 @@ template <class T, class U> class FarVertexEditTablesFactory {
 protected:
     template <class X, class Y> friend class FarMeshFactory;
 
-    /// Compares the number of subfaces in an edit (for sorting purposes)
+    /// \brief Compares the number of subfaces in an edit (for sorting purposes)
     static bool compareEdits(HbrVertexEdit<T> const *a, HbrVertexEdit<T> const *b);
     
     static void insertHEditBatch(FarKernelBatchVector *batches, int batchIndex, int batchLevel, int batchCount, int tableOffset);
 
-    /// Creates a FarVertexEditTables instance.
+    /// \brief Creates a FarVertexEditTables instance.
     static FarVertexEditTables<U> * Create( FarMeshFactory<T,U> const * factory, FarMesh<U> * mesh, FarKernelBatchVector *batches, int maxlevel );
 };
 
@@ -197,11 +197,13 @@ FarVertexEditTablesFactory<T,U>::Create( FarMeshFactory<T,U> const * factory, Fa
         int & batchCount = currentCounts[batchIndex];
         typename FarVertexEditTables<U>::VertexEditBatch &batch = result->_batches[batchIndex];
 
-        // insert a batch into batch array
-        if (batchLevel != level-1 && batchCount != currentOffsets[batchIndex]) {
-            // if the batch isn't empty, emit kernelBatch
-            insertHEditBatch(batches, batchIndex, batchLevel, batchCount-currentOffsets[batchIndex], currentOffsets[batchIndex]);
-
+        // if a new batch is needed
+        if (batchLevel != level-1) {
+            // if the current batch isn't empty, emit a kernelBatch
+            if (batchCount != currentOffsets[batchIndex]) {
+                insertHEditBatch(batches, batchIndex, batchLevel, batchCount-currentOffsets[batchIndex], currentOffsets[batchIndex]);
+            }
+            // prepare a next batch
             batchLevel = level-1;
             currentOffsets[batchIndex] = batchCount;
         }

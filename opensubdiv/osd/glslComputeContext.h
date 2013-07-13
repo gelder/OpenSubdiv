@@ -57,28 +57,14 @@
 #ifndef OSD_GLSL_COMPUTE_CONTEXT_H
 #define OSD_GLSL_COMPUTE_CONTEXT_H
 
-#if defined(__APPLE__)
-    #include "TargetConditionals.h"
-    #if TARGET_OS_IPHONE or TARGET_IPHONE_SIMULATOR
-        #include <OpenGLES/ES2/gl.h>
-    #else
-        #include <OpenGL/gl3.h>
-    #endif
-#elif defined(ANDROID)
-    #include <GLES2/gl2.h>
-#else
-    #if defined(_WIN32)
-        #include <windows.h>
-    #endif
-    #include <GL/gl.h>
-#endif
-
 #include "../version.h"
 
 #include "../far/vertexEditTables.h"
 #include "../osd/vertex.h"
 #include "../osd/vertexDescriptor.h"
 #include "../osd/nonCopyable.h"
+
+#include "../osd/opengl.h"
 
 #include <vector>
 
@@ -92,7 +78,7 @@ class OsdGLSLComputeTable : OsdNonCopyable<OsdGLSLComputeTable> {
 public:
     template<typename T>
     explicit OsdGLSLComputeTable(const std::vector<T> &table) {
-        createBuffer(table.size() * sizeof(unsigned int), &table[0]);
+        createBuffer(table.size() * sizeof(unsigned int), table.empty() ? NULL : &table[0]);
     }
 
     virtual ~OsdGLSLComputeTable();

@@ -55,6 +55,7 @@
 #     a particular purpose and non-infringement.
 #
 
+#-------------------------------------------------------------------------------
 set(PUBLIC_HEADER_FILES
     bilinearSubdivisionTables.h
     bilinearSubdivisionTablesFactory.h
@@ -69,6 +70,7 @@ set(PUBLIC_HEADER_FILES
     mesh.h
     multiMeshFactory.h
     patchParam.h
+    patchMap.h
     patchTables.h
     patchTablesFactory.h
     subdivisionTables.h
@@ -77,6 +79,11 @@ set(PUBLIC_HEADER_FILES
     vertexEditTablesFactory.h
 )    
 
+#-------------------------------------------------------------------------------
+_add_doxy_headers( "${PUBLIC_HEADER_FILES}" )
+
 install( FILES ${PUBLIC_HEADER_FILES}
          DESTINATION ${CMAKE_INCDIR_BASE}/far
          PERMISSIONS OWNER_READ GROUP_READ WORLD_READ )
+
+#-------------------------------------------------------------------------------

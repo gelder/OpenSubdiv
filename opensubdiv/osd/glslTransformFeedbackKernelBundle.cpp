@@ -55,11 +55,7 @@
 //     a particular purpose and non-infringement.
 //
 
-#if defined(__APPLE__)
-    #include <OpenGL/gl3.h>
-#else
-    #include <GL/glew.h>
-#endif
+#include "../version.h"
 
 #include <stdio.h>
 #ifdef _MSC_VER
@@ -72,6 +68,8 @@
 #include "../osd/vertex.h"
 
 #include "../far/subdivisionTables.h"
+
+#include "../osd/opengl.h"
 
 #include <cassert>
 
@@ -130,17 +128,17 @@ OsdGLSLTransformFeedbackKernelBundle::Compile(int numVertexElements, int numVary
 
     const char *outputs[4];
     int nOutputs = 0;
-    outputs[nOutputs++] = "outPosition";
 
     // position and custom vertex data are stored same buffer whereas varying data
     // exists on another buffer. "gl_NextBuffer" identifier helps to split them.
-    if (numVertexElements > 3) {
+    if (numVertexElements > 0)
         outputs[nOutputs++] = "outVertexData";
-    }
     if (numVaryingElements > 0) {
-        outputs[nOutputs++] = "gl_NextBuffer";
+        if (nOutputs > 0)
+            outputs[nOutputs++] = "gl_NextBuffer";
         outputs[nOutputs++] = "outVaryingData";
     }
+
     glTransformFeedbackVaryings(_program, nOutputs, outputs, GL_INTERLEAVED_ATTRIBS);
 
     OSD_DEBUG_CHECK_GL_ERROR("Transform feedback initialize\n");
@@ -165,7 +163,7 @@ OsdGLSLTransformFeedbackKernelBundle::Compile(int numVertexElements, int numVary
 
     glDeleteShader(shader);
 
-    _uniformVertexBuffer         = glGetUniformLocation(_program, "vertex");
+    _uniformVertexBuffer         = glGetUniformLocation(_program, "vertexData");
     _uniformVaryingBuffer        = glGetUniformLocation(_program, "varyingData");
 
     _subComputeFace = glGetSubroutineIndex(_program, GL_VERTEX_SHADER, "catmarkComputeFace");
@@ -218,7 +216,7 @@ OsdGLSLTransformFeedbackKernelBundle::transformGpuBufferData(
     glUniform1i(_uniformTableOffset, tableOffset);
     // XXX: end is not used here now
     OSD_DEBUG_CHECK_GL_ERROR("Uniform index set at offset=%d. start=%d\n",
-                             offset, start);
+                             vertexOffset, start);
 
     // set transform feedback buffer
     if (vertexBuffer) {

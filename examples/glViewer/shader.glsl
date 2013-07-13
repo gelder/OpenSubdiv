@@ -55,22 +55,53 @@
 //     a particular purpose and non-infringement.
 //
 
+#if defined(VARYING_COLOR) || defined(FACEVARYING_COLOR)
+#undef OSD_USER_VARYING_DECLARE
+#define OSD_USER_VARYING_DECLARE \
+    vec3 color;
+
+#undef OSD_USER_VARYING_ATTRIBUTE_DECLARE
+#define OSD_USER_VARYING_ATTRIBUTE_DECLARE \
+    layout(location = 1) in vec3 color;
+
+#undef OSD_USER_VARYING_PER_VERTEX
+#define OSD_USER_VARYING_PER_VERTEX() \
+    outpt.color = color
+
+#undef OSD_USER_VARYING_PER_CONTROL_POINT
+#define OSD_USER_VARYING_PER_CONTROL_POINT(ID_OUT, ID_IN) \
+    outpt[ID_OUT].color = inpt[ID_IN].color
+
+#undef OSD_USER_VARYING_PER_EVAL_POINT
+#define OSD_USER_VARYING_PER_EVAL_POINT(UV, a, b, c, d) \
+    outpt.color = \
+        mix(mix(inpt[a].color, inpt[b].color, UV.x), \
+            mix(inpt[c].color, inpt[d].color, UV.x), UV.y)
+#else
+#define OSD_USER_VARYING_DECLARE
+#define OSD_USER_VARYING_ATTRIBUTE_DECLARE
+#define OSD_USER_VARYING_PER_VERTEX()
+#define OSD_USER_VARYING_PER_CONTROL_POINT(ID_OUT, ID_IN)
+#define OSD_USER_VARYING_PER_EVAL_POINT(UV, a, b, c, d)
+#endif
+
 //--------------------------------------------------------------
 // Vertex Shader
 //--------------------------------------------------------------
 #ifdef VERTEX_SHADER
 
 layout (location=0) in vec4 position;
-layout (location=1) in vec3 normal;
+OSD_USER_VARYING_ATTRIBUTE_DECLARE
 
 out block {
     OutputVertex v;
-} output;
+    OSD_USER_VARYING_DECLARE
+} outpt;
 
 void main()
 {
-    output.v.position = ModelViewMatrix * position;
-    output.v.normal = (ModelViewMatrix * vec4(normal, 0.0)).xyz;
+    outpt.v.position = ModelViewMatrix * position;
+    OSD_USER_VARYING_PER_VERTEX();
 }
 
 #endif
@@ -84,13 +115,7 @@ void main()
 
     layout(lines_adjacency) in;
 
-    layout(triangle_strip, max_vertices = 4) out;
-
     #define EDGE_VERTS 4
-
-    in block {
-        OutputVertex v;
-    } input[4];
 
 #endif // PRIM_QUAD
 
@@ -98,40 +123,49 @@ void main()
 
     layout(triangles) in;
 
-    layout(triangle_strip, max_vertices = 3) out;
-
     #define EDGE_VERTS 3
-
-    in block {
-        OutputVertex v;
-    } input[3];
 
 #endif // PRIM_TRI
 
-#ifdef PRIM_POINT
 
-    layout(points) in;
-    layout(points, max_vertices = 1) out;
-
-    in block {
-        OutputVertex v;
-    } input[1];
-
-#endif // PRIM_POINT
+layout(triangle_strip, max_vertices = EDGE_VERTS) out;
+in block {
+    OutputVertex v;
+    OSD_USER_VARYING_DECLARE
+} inpt[EDGE_VERTS];
 
 out block {
     OutputVertex v;
-} output;
+    noperspective out vec4 edgeDistance;
+    OSD_USER_VARYING_DECLARE
+} outpt;
 
 void emit(int index, vec3 normal)
 {
-    output.v.position = input[index].v.position;
+    outpt.v.position = inpt[index].v.position;
 #ifdef SMOOTH_NORMALS
-    output.v.normal = input[index].v.normal;
+    outpt.v.normal = inpt[index].v.normal;
 #else
-    output.v.normal = normal;
+    outpt.v.normal = normal;
 #endif
-    gl_Position = ProjectionMatrix * input[index].v.position;
+
+#ifdef VARYING_COLOR
+    outpt.color = inpt[index].color;
+#endif
+
+#ifdef FACEVARYING_COLOR
+#ifdef UNIFORM_SUBDIVISION
+    vec2 quadst[4] = vec2[](vec2(0,0), vec2(1,0), vec2(1,1), vec2(0,1));
+    vec2 st = quadst[index];
+#else
+    vec2 st = inpt[index].v.tessCoord;
+#endif
+    vec2 uv;
+    OSD_COMPUTE_FACE_VARYING_2(uv, /*fvarOffset=*/0, st);
+    outpt.color = vec3(uv.s, uv.t, 0);
+#endif
+
+    gl_Position = ProjectionMatrix * inpt[index].v.position;
     EmitVertex();
 }
 
@@ -147,18 +181,18 @@ float edgeDistance(vec4 p, vec4 p0, vec4 p1)
 
 void emit(int index, vec3 normal, vec4 edgeVerts[EDGE_VERTS])
 {
-    output.v.edgeDistance[0] =
+    outpt.edgeDistance[0] =
         edgeDistance(edgeVerts[index], edgeVerts[0], edgeVerts[1]);
-    output.v.edgeDistance[1] =
+    outpt.edgeDistance[1] =
         edgeDistance(edgeVerts[index], edgeVerts[1], edgeVerts[2]);
 #ifdef PRIM_TRI
-    output.v.edgeDistance[2] =
+    outpt.edgeDistance[2] =
         edgeDistance(edgeVerts[index], edgeVerts[2], edgeVerts[0]);
 #endif
 #ifdef PRIM_QUAD
-    output.v.edgeDistance[2] =
+    outpt.edgeDistance[2] =
         edgeDistance(edgeVerts[index], edgeVerts[2], edgeVerts[3]);
-    output.v.edgeDistance[3] =
+    outpt.edgeDistance[3] =
         edgeDistance(edgeVerts[index], edgeVerts[3], edgeVerts[0]);
 #endif
 
@@ -170,22 +204,18 @@ void main()
 {
     gl_PrimitiveID = gl_PrimitiveIDIn;
 
-#ifdef PRIM_POINT
-    emit(0, vec3(0));
-#endif
-    
 #ifdef PRIM_QUAD
-    vec3 A = (input[0].v.position - input[1].v.position).xyz;
-    vec3 B = (input[3].v.position - input[1].v.position).xyz;
-    vec3 C = (input[2].v.position - input[1].v.position).xyz;
+    vec3 A = (inpt[0].v.position - inpt[1].v.position).xyz;
+    vec3 B = (inpt[3].v.position - inpt[1].v.position).xyz;
+    vec3 C = (inpt[2].v.position - inpt[1].v.position).xyz;
     vec3 n0 = normalize(cross(B, A));
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
     vec4 edgeVerts[EDGE_VERTS];
-    edgeVerts[0] = ProjectionMatrix * input[0].v.position;
-    edgeVerts[1] = ProjectionMatrix * input[1].v.position;
-    edgeVerts[2] = ProjectionMatrix * input[2].v.position;
-    edgeVerts[3] = ProjectionMatrix * input[3].v.position;
+    edgeVerts[0] = ProjectionMatrix * inpt[0].v.position;
+    edgeVerts[1] = ProjectionMatrix * inpt[1].v.position;
+    edgeVerts[2] = ProjectionMatrix * inpt[2].v.position;
+    edgeVerts[3] = ProjectionMatrix * inpt[3].v.position;
 
     edgeVerts[0].xy /= edgeVerts[0].w;
     edgeVerts[1].xy /= edgeVerts[1].w;
@@ -205,15 +235,15 @@ void main()
 #endif // PRIM_QUAD
 
 #ifdef PRIM_TRI
-    vec3 A = (input[1].v.position - input[0].v.position).xyz;
-    vec3 B = (input[2].v.position - input[0].v.position).xyz;
+    vec3 A = (inpt[1].v.position - inpt[0].v.position).xyz;
+    vec3 B = (inpt[2].v.position - inpt[0].v.position).xyz;
     vec3 n0 = normalize(cross(B, A));
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
     vec4 edgeVerts[EDGE_VERTS];
-    edgeVerts[0] = ProjectionMatrix * input[0].v.position;
-    edgeVerts[1] = ProjectionMatrix * input[1].v.position;
-    edgeVerts[2] = ProjectionMatrix * input[2].v.position;
+    edgeVerts[0] = ProjectionMatrix * inpt[0].v.position;
+    edgeVerts[1] = ProjectionMatrix * inpt[1].v.position;
+    edgeVerts[2] = ProjectionMatrix * inpt[2].v.position;
 
     edgeVerts[0].xy /= edgeVerts[0].w;
     edgeVerts[1].xy /= edgeVerts[1].w;
@@ -241,7 +271,9 @@ void main()
 
 in block {
     OutputVertex v;
-} input;
+    noperspective in vec4 edgeDistance;
+    OSD_USER_VARYING_DECLARE
+} inpt;
 
 out vec4 outColor;
 
@@ -262,7 +294,7 @@ uniform vec4 diffuseColor = vec4(1);
 uniform vec4 ambientColor = vec4(1);
 
 vec4
-lighting(vec3 Peye, vec3 Neye)
+lighting(vec4 diffuse, vec3 Peye, vec3 Neye)
 {
     vec4 color = vec4(0);
 
@@ -280,7 +312,7 @@ lighting(vec3 Peye, vec3 Neye)
         float s = pow(max(0.0, dot(n, h)), 500.0f);
 
         color += lightSource[i].ambient * ambientColor
-            + d * lightSource[i].diffuse * diffuseColor
+            + d * lightSource[i].diffuse * diffuse
             + s * lightSource[i].specular;
     }
 
@@ -288,27 +320,18 @@ lighting(vec3 Peye, vec3 Neye)
     return color;
 }
 
-#ifdef PRIM_POINT
-uniform vec4 fragColor;
-void
-main()
-{
-    outColor = fragColor;
-}
-#endif
-
 vec4
 edgeColor(vec4 Cfill, vec4 edgeDistance)
 {
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
 #ifdef PRIM_TRI
     float d =
-        min(input.v.edgeDistance[0], min(input.v.edgeDistance[1], input.v.edgeDistance[2]));
+        min(inpt.edgeDistance[0], min(inpt.edgeDistance[1], inpt.edgeDistance[2]));
 #endif
 #ifdef PRIM_QUAD
     float d =
-        min(min(input.v.edgeDistance[0], input.v.edgeDistance[1]),
-            min(input.v.edgeDistance[2], input.v.edgeDistance[3]));
+        min(min(inpt.edgeDistance[0], inpt.edgeDistance[1]),
+            min(inpt.edgeDistance[2], inpt.edgeDistance[3]));
 #endif
     vec4 Cedge = vec4(1.0, 1.0, 0.0, 1.0);
     float p = exp2(-2 * d * d);
@@ -326,11 +349,22 @@ edgeColor(vec4 Cfill, vec4 edgeDistance)
 void
 main()
 {
-    vec3 N = (gl_FrontFacing ? input.v.normal : -input.v.normal);
-    vec4 Cf = lighting(input.v.position.xyz, N);
+    vec3 N = (gl_FrontFacing ? inpt.v.normal : -inpt.v.normal);
+
+#if defined(VARYING_COLOR)
+    vec4 color = vec4(inpt.color, 1);
+#elif defined(FACEVARYING_COLOR)
+    // generating a checkerboard pattern
+    vec4 color = vec4(inpt.color.rg,
+                      int(floor(20*inpt.color.r)+floor(20*inpt.color.g))&1, 1);
+#else
+    vec4 color = diffuseColor;
+#endif
+
+    vec4 Cf = lighting(color, inpt.v.position.xyz, N);
 
 #if defined(GEOMETRY_OUT_WIRE) || defined(GEOMETRY_OUT_LINE)
-    Cf = edgeColor(Cf, input.v.edgeDistance);
+    Cf = edgeColor(Cf, inpt.edgeDistance);
 #endif
 
     outColor = Cf;

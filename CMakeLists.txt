@@ -250,13 +250,15 @@ endif()
 find_package(OpenGL)
 find_package(OpenGLES)
 find_package(OpenCL 1.1)
-find_package(CUDA 4.0)
+if(NOT NO_CUDA)
+    find_package(CUDA 4.0)
+endif()
 find_package(GLFW 2.7.0)
 find_package(PTex 2.0)
 find_package(PythonInterp 2.6)
 find_package(SWIG 1.3.40)
-find_package(Doxygen)
-
+find_package(Doxygen 1.8.4)
+find_package(Docutils 0.6)
 if (NOT APPLE AND OPENGL_FOUND)
     find_package(GLEW REQUIRED)
 endif()
@@ -294,6 +296,11 @@ endif()
 
 if(GLFW_FOUND AND (GLFW_VERSION VERSION_EQUAL 3.0 OR GLFW_VERSION VERSION_GREATER 3.0))
     add_definitions( -DGLFW_VERSION_3 )
+endif()
+
+# note: perhaps rename this to be more consistent, e.g. OPENSUBDIV_USES_GLEW
+if(GLEW_FOUND)
+    add_definitions( -DOSD_USES_GLEW )
 endif()
 
 # note : (GLSL transform feedback kernels require GL 4.2)
@@ -378,63 +385,6 @@ else()
     )
 endif()
 
-if(PYTHONINTERP_FOUND AND SWIG_FOUND)
-    message(STATUS "Python and SWIG found.  Looking for numpy...")
-    execute_process(
-        COMMAND
-        ${PYTHON_EXECUTABLE} -c "import numpy; print numpy.get_include()"
-        OUTPUT_VARIABLE NUMPY_INCLUDE_PATH
-        RESULT_VARIABLE NUMPY_ERR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(NUMPY_ERR)
-        message(WARNING "Unable to import numpy.")
-    else()
-        message(STATUS "Numpy package has been located.")
-        set(PYCMD ${PYTHON_EXECUTABLE} setup.py build )
-        list(APPEND PYCMD --osddir=${LIBRARY_OUTPUT_PATH} )
-        list(APPEND PYCMD --build-platlib=${PROJECT_BINARY_DIR}/python )
-        list(APPEND PYCMD --build-temp=${PROJECT_BINARY_DIR}/temp )
-        
-        # grab all compiler definitions and add '-D'
-        get_directory_property( TMP DIRECTORY ${CMAKE_SOURCE_DIR} COMPILE_DEFINITIONS )
-        foreach(FLAG ${TMP})
-            list(APPEND SWIG_COMPILE_FLAGS "-D${FLAG}")
-        endforeach()
-        
-        # append platform specific compiler flags
-        list(APPEND SWIG_COMPILE_FLAGS ${OSD_COMPILER_FLAGS})
-        list(APPEND PYCMD --cxxflags="${SWIG_COMPILE_FLAGS}" )
-        
-        # add Swig -builtin optimization build flag 
-        if(SWIG_VERSION VERSION_GREATER 2.0.4)
-            list(APPEND SWIG_OPTS "-builtin")
-        endif()
-        list(APPEND PYCMD --swigopts="${SWIG_OPTS}" )
-        
-        add_custom_command(
-            OUTPUT ${PROJECT_BINARY_DIR}/python/osd
-            COMMAND ${PYCMD}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/python
-            DEPENDS osd_static_cpu osd_dynamic_cpu
-            COMMENT "Building Python bindings with distutils"
-        )
-        add_custom_target(python ALL
-            DEPENDS ${PROJECT_BINARY_DIR}/python/osd
-        )
-        install(CODE "execute_process(
-                      WORKING_DIRECTORY ../python 
-                      COMMAND ${PYCMD} install --user)"
-        )
-    endif()
-else()
-    message(WARNING
-        "Python / Swig not found : python bindings and examples will not be "
-	"available. If you do have Python and Swig installed and see this "
-	"message, please check the default FindPython.cmake module."
-    )
-endif()
-
 # Link examples & regressions dynamically against Osd
 set( OSD_LINK_TARGET osd_dynamic_cpu osd_dynamic_gpu )
 
@@ -466,6 +416,47 @@ endif()
 
 #-------------------------------------------------------------------------------
 # General-use macros
+
+# Macro for processing public headers into the build area for doxygen processing
+
+#set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+add_custom_target( public_headers )
+
+macro(_add_doxy_headers headers)
+    if (NOT NO_DOC AND DOXYGEN_FOUND)
+        file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} )
+
+        string(REPLACE  "/" "_" targetpath ${path})
+
+        foreach (header ${headers})
+
+            set(infile ${CMAKE_CURRENT_SOURCE_DIR}/${header})
+            set(outfile ${CMAKE_BINARY_DIR}/public_headers/${path}/${header})
+            set(targetname "${targetpath}_${header}")
+
+            add_custom_command(
+                OUTPUT
+                    ${outfile}
+                COMMAND
+                    ${CMAKE_COMMAND}
+                ARGS
+                    -E copy ${infile} ${outfile}
+                DEPENDS
+                    ${infile}
+            )
+
+            add_custom_target(${targetname} DEPENDS ${outfile})
+            
+            #set_target_properties(${targetname} PROPERTIES FOLDER "public_headers/")
+
+            list(APPEND headerfiles ${targetname} )
+        endforeach()
+
+        add_dependencies( public_headers DEPENDS ${headerfiles} )
+    endif()
+endmacro()
+
 
 # Macro for adding a cuda executable if cuda is found and a regular
 # executable otherwise.
@@ -517,12 +508,18 @@ endmacro()
 
 add_subdirectory(opensubdiv)
 
-if(NOT ANDROID AND NOT IOS) # XXXdyu
+if (NOT NO_REGRESSION AND NOT ANDROID AND NOT IOS) # XXXdyu
     add_subdirectory(regression)
 endif()
 
-add_subdirectory(examples)
+if (NOT NO_EXAMPLES)
+    add_subdirectory(examples)
+endif()
 
-if (DOXYGEN_FOUND)
+if (NOT NO_PYTHON)
+    add_subdirectory(python)
+endif()
+
+if (NOT NO_DOC)
     add_subdirectory(documentation)
 endif()

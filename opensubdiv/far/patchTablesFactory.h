@@ -77,7 +77,7 @@ template <class T> class FarPatchTablesFactory {
 protected:
     template <class X, class Y> friend class FarMeshFactory;
 
-    /// Factory constructor for feature-adaptive meshes
+    /// \brief Factory constructor for feature-adaptive meshes
     ///
     /// @param mesh        Hbr mesh to generate tables for
     ///
@@ -87,7 +87,7 @@ protected:
     ///
     FarPatchTablesFactory( HbrMesh<T> const * mesh, int nfaces, std::vector<int> const & remapTable );
     
-    /// Returns a feature-adaptive FarPatchTables instance 
+    /// \brief Returns a feature-adaptive FarPatchTables instance 
     ///
     /// @param maxlevel         Highest level of refinement processed
     ///
@@ -102,7 +102,7 @@ protected:
 
     typedef std::vector<std::vector< HbrFace<T> *> > FacesList;
 
-    /// Factory constructor for uniform meshes
+    /// \brief Factory constructor for uniform meshes
     ///
     /// @param mesh             Hbr mesh to generate tables for
     ///
@@ -156,6 +156,9 @@ private:
 
     // The number of patch arrays in the mesh
     int getNumPatchArrays() const;
+    
+    // The number of patches in the mesh
+    static int getNumPatches( FarPatchTables::PatchArrayVector const & parrays );
 
     // Reserves tables based on the contents of the PatchArrayVector
     static void allocateTables( FarPatchTables * tables, int fvarwidth );
@@ -254,7 +257,7 @@ template <class T> void
 FarPatchTablesFactory<T>::allocateTables( FarPatchTables * tables, int fvarwidth ) {
 
     int nverts = tables->GetNumControlVertices(),
-        npatches = tables->GetNumPatches();
+        npatches = getNumPatches(tables->GetPatchArrayVector());
 
     if (nverts==0 or npatches==0)
         return;
@@ -310,7 +313,7 @@ FarPatchTablesFactory<T>::Create( HbrMesh<T> const * mesh, FacesList const & fli
 
     unsigned int  * iptr = &result->_patches[0];
     FarPatchParam * pptr = &result->_paramTable[0];
-    float         * fptr = requireFVarData ? &result->_fvarTable[0] : 0;
+    float         * fptr = fvarwidth>0 ? &result->_fvarTable[0] : 0;
     
     for (int level=firstArray; level<(int)flist.size(); ++level) {
 
@@ -324,7 +327,7 @@ FarPatchTablesFactory<T>::Create( HbrMesh<T> const * mesh, FacesList const & fli
             
             pptr = computePatchParam(f, pptr);
             
-            if (requireFVarData)
+            if (fvarwidth>0)
                 fptr = computeFVarData(f, fvarwidth, fptr, /*isAdaptive=*/false);
         }
     }
@@ -637,6 +640,17 @@ FarPatchTablesFactory<T>::getNumPatchArrays() const {
     return result;
 }
 
+template <class T> int 
+FarPatchTablesFactory<T>::getNumPatches( FarPatchTables::PatchArrayVector const & parrays ) {
+
+    int result=0;
+    for (int i=0; i<(int)parrays.size(); ++i) {
+        result += parrays[i].GetNumPatches();
+    }
+
+    return result;
+}
+
 template <class T> void
 FarPatchTablesFactory<T>::pushPatchArray( FarPatchTables::Descriptor desc, 
                                           FarPatchTables::PatchArrayVector & parray, 
@@ -705,7 +719,8 @@ FarPatchTablesFactory<T>::Create( int maxlevel, int maxvalence, bool requireFVar
 
         iptrs[(int)pa->GetDescriptor().GetPattern()].getValue( *it ) = &result->_patches[pa->GetVertIndex()];
         pptrs[(int)pa->GetDescriptor().GetPattern()].getValue( *it ) = &result->_paramTable[pa->GetPatchIndex()];
-        if (requireFVarData)
+        
+        if (fvarwidth>0)
             fptrs[(int)pa->GetDescriptor().GetPattern()].getValue( *it ) = &result->_fvarTable[pa->GetPatchIndex() * 4 * fvarwidth];
     }
  

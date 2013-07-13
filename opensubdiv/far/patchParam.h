@@ -58,6 +58,10 @@
 #ifndef FAR_PATCH_PARAM_H
 #define FAR_PATCH_PARAM_H
 
+#include "../version.h"
+
+#include <cassert>
+
 namespace OpenSubdiv {
 namespace OPENSUBDIV_VERSION {
 
@@ -70,14 +74,16 @@ namespace OPENSUBDIV_VERSION {
 /// but has to be remapped to a specific layout for uv textures.
 ///
 /// Bitfield layout :
-///
-///   level:4      - the subdivision level of the patch
-///   nonquad:1;   - whether the patch is the child of a non-quad face
-///   rotation:2;  - patch rotations necessary to match CCW face-winding
-///   v:10;        - log2 value of u parameter at first patch corner
-///   u:10;        - log2 value of v parameter at first patch corner
-///   reserved1:5; - padding
-///
+/// 
+///  Field      | Bits | Content                                              
+///  -----------|:----:|------------------------------------------------------
+///  level      | 4    | the subdivision level of the patch                   
+///  nonquad    | 1    | whether the patch is the child of a non-quad face    
+///  rotation   | 2    | patch rotations necessary to match CCW face-winding  
+///  v          | 10   | log2 value of u parameter at first patch corner      
+///  u          | 10   | log2 value of v parameter at first patch corner      
+///  reserved1  | 5    | padding                                              
+/// 
 /// Note : the bitfield is not expanded in the struct due to differences in how
 ///        GPU & CPU compilers pack bit-fields and endian-ness.
 ///
@@ -87,7 +93,7 @@ struct FarPatchParam {
     struct BitField {
         unsigned int field:32;
         
-        /// Sets the values of the bit fields
+        /// \brief Sets the values of the bit fields
         ///
         /// @param u value of the u parameter for the first corner of the face
         /// @param v value of the v parameter for the first corner of the face
@@ -104,29 +110,50 @@ struct FarPatchParam {
                     (nonquad ? depth+1 : depth);
         }
 
-        /// Returns the log2 value of the u parameter at the top left corner of
+        /// \brief Returns the log2 value of the u parameter at the top left corner of
         /// the patch
         unsigned short GetU() const { return (field >> 17) & 0x3ff; }
 
-        /// Returns the log2 value of the v parameter at the top left corner of
+        /// \brief Returns the log2 value of the v parameter at the top left corner of
         /// the patch
         unsigned short GetV() const { return (field >> 7) & 0x3ff; }
 
-        /// Returns the rotation of the patch (the number of CCW parameter winding)
+        /// \brief Returns the rotation of the patch (the number of CCW parameter winding)
         unsigned char GetRotation() const { return (field >> 5) & 0x3; }
 
-        /// True if the parent coarse face is a non-quad
+        /// \brief True if the parent coarse face is a non-quad
         bool NonQuadRoot() const { return (field >> 4) & 0x1; }
+        
+        /// \brief Returns the fratcion of normalized parametric space covered by the 
+        /// sub-patch.
+        float GetParamFraction() const;
 
-        /// Returns the level of subdivision of the patch 
+        /// \brief Returns the level of subdivision of the patch 
         unsigned char GetDepth() const { return (field & 0xf); }
 
-        /// Resets the values to 0
+        /// The (u,v) pair is normalized to this sub-parametric space. 
+        ///
+        /// @param u  u parameter
+        ///
+        /// @param v  v parameter
+        ///
+        void Normalize( float & u, float & v ) const;
+        
+        /// \brief Rotate (u,v) pair to compensate for transition pattern and boundary
+        /// orientations.
+        ///
+        /// @param u  u parameter
+        ///
+        /// @param v  v parameter
+        ///
+        void Rotate( float & u, float & v ) const;
+
+        /// \brief Resets the values to 0
         void Clear() { field = 0; }
                 
     } bitField;
 
-    /// Sets the values of the bit fields
+    /// \brief Sets the values of the bit fields
     ///
     /// @param faceid ptex face index
     ///
@@ -142,12 +169,47 @@ struct FarPatchParam {
         bitField.Set(u,v,rots,depth,nonquad);
     }
     
-    /// Resets everything to 0
+    /// \brief Resets everything to 0
     void Clear() { 
         faceIndex = 0;
         bitField.Clear();
-    }    
+    }
 };
+
+inline float 
+FarPatchParam::BitField::GetParamFraction( ) const {
+    if (NonQuadRoot()) {
+        return 1.0f / float( 1 << (GetDepth()-1) );
+    } else {
+        return 1.0f / float( 1 << GetDepth() );
+    }
+}
+
+inline void
+FarPatchParam::BitField::Normalize( float & u, float & v ) const {
+
+    float frac = GetParamFraction();
+
+    // top left corner
+    float pu = (float)GetU()*frac;
+    float pv = (float)GetV()*frac;
+
+    // normalize u,v coordinates
+    u = (u - pu) / frac,
+    v = (v - pv) / frac;
+}
+
+inline void 
+FarPatchParam::BitField::Rotate( float & u, float & v ) const {
+    switch( GetRotation() ) {
+         case 0 : break;
+         case 1 : { float tmp=v; v=1.0f-u; u=tmp; } break;
+         case 2 : { u=1.0f-u; v=1.0f-v; } break;
+         case 3 : { float tmp=u; u=1.0f-v; v=tmp; } break;
+         default:
+             assert(0);
+    }
+}
 
 } // end namespace OPENSUBDIV_VERSION
 using namespace OPENSUBDIV_VERSION;

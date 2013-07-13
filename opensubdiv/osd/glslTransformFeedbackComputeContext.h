@@ -57,28 +57,14 @@
 #ifndef OSD_GLSL_TRANSFORM_FEEDBACK_COMPUTE_CONTEXT_H
 #define OSD_GLSL_TRANSFORM_FEEDBACK_COMPUTE_CONTEXT_H
 
-#if defined(__APPLE__)
-    #include "TargetConditionals.h"
-    #if TARGET_OS_IPHONE or TARGET_IPHONE_SIMULATOR
-        #include <OpenGLES/ES2/gl.h>
-    #else
-        #include <OpenGL/gl3.h>
-    #endif
-#elif defined(ANDROID)
-    #include <GLES2/gl2.h>
-#else
-    #if defined(_WIN32)
-        #include <windows.h>
-    #endif
-    #include <GL/gl.h>
-#endif
-
 #include "../version.h"
 
 #include "../far/vertexEditTables.h"
 #include "../osd/vertex.h"
 #include "../osd/vertexDescriptor.h"
 #include "../osd/nonCopyable.h"
+
+#include "../osd/opengl.h"
 
 #include <vector>
 
@@ -91,7 +77,7 @@ class OsdGLSLTransformFeedbackTable : OsdNonCopyable<OsdGLSLTransformFeedbackTab
 public:
     template<typename T>
     OsdGLSLTransformFeedbackTable(const std::vector<T> &table, GLenum type) {
-        createTextureBuffer(table.size() * sizeof(unsigned int), &table[0], type);
+        createTextureBuffer(table.size() * sizeof(unsigned int), table.empty() ? NULL : &table[0], type);
     }
 
     virtual ~OsdGLSLTransformFeedbackTable();
@@ -168,14 +154,14 @@ public:
         _vdesc.numVertexElements = vertex ? vertex->GetNumElements() : 0;
         _vdesc.numVaryingElements = varying ? varying->GetNumElements() : 0;
 
-        bindTextures();
+        bind();
     }
 
     /// Unbinds any previously bound vertex and varying data buffers.
     void Unbind() {
         _currentVertexBuffer = 0;
         _currentVaryingBuffer = 0;
-        unbindTextures();
+        unbind();
     }
 
     /// Returns one of the vertex refinement tables.
@@ -218,13 +204,13 @@ public:
 protected:
     explicit OsdGLSLTransformFeedbackComputeContext(FarMesh<OsdVertex> const *farMesh);
 
-    void bindTexture(GLuint sampler, GLuint texture, int unit);
+    void bindTexture(GLint samplerUniform, GLuint texture, int unit);
 
     void unbindTexture(GLuint unit);
 
-    void bindTextures();
+    void bind();
 
-    void unbindTextures();
+    void unbind();
 
 private:
     std::vector<OsdGLSLTransformFeedbackTable*> _tables;

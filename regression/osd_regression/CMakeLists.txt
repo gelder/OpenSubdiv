@@ -84,6 +84,8 @@ add_executable(osd_regression
     ${SOURCE_FILES}
 )
 
+add_dependencies(osd_regression blarg )
+
 target_link_libraries(osd_regression
     ${PLATFORM_LIBRARIES}
 )

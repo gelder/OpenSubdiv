@@ -56,7 +56,11 @@
 //
 
 #if defined(__APPLE__)
-    #include <OpenGL/gl3.h>
+    #if defined(OSD_USES_GLEW)
+        #include <GL/glew.h>
+    #else
+        #include <OpenGL/gl3.h>
+    #endif
     #define GLFW_INCLUDE_GL3
     #define GLFW_NO_GLU
 #else
@@ -68,7 +72,7 @@
 #endif
 
 #if defined(GLFW_VERSION_3)
-    #include <GL/glfw3.h>
+    #include <GLFW/glfw3.h>
     GLFWwindow* g_window=0;
     GLFWmonitor* g_primary=0;
 #else
@@ -127,7 +131,8 @@ struct SimpleShape {
 std::vector<SimpleShape> g_defaultShapes;
 
 std::vector<float> g_orgPositions,
-                   g_positions;
+                   g_positions,
+                   g_varyingColors;
 
 int g_currentShape = 0,
     g_level = 3,
@@ -137,12 +142,17 @@ std::vector<int>   g_coarseEdges;
 std::vector<float> g_coarseEdgeSharpness;
 std::vector<float> g_coarseVertexSharpness;
 
+enum DrawMode { kUV=0,
+                kVARYING=1,
+                kFACEVARYING=2 };
+
 int   g_running = 1,
       g_width = 1024,
       g_height = 1024,
       g_fullscreen = 0,
       g_drawCageEdges = 1,
-      g_drawCageVertices = 0,
+      g_drawCageVertices = 1,
+      g_drawMode = kUV,
       g_prev_x = 0,
       g_prev_y = 0,
       g_mbutton[3] = {0, 0, 0},
@@ -274,8 +284,6 @@ initializeShapes( ) {
 }
 
 //------------------------------------------------------------------------------
-OsdCpuVertexBuffer * g_samplesVB=0;
-
 int g_nsamples=1000,
     g_nsamplesFound=0;
 
@@ -286,29 +294,6 @@ GLuint g_cageEdgeVAO = 0,
        g_samplesVAO=0;
 
 GLhud g_hud;
-
-//------------------------------------------------------------------------------
-static void
-createCoarseMesh( OsdHbrMesh * const hmesh, int nfaces ) {
-    // save coarse topology (used for coarse mesh drawing)
-    g_coarseEdges.clear();
-    g_coarseEdgeSharpness.clear();
-    g_coarseVertexSharpness.clear();
-
-    for(int i=0; i<nfaces; ++i) {
-        OsdHbrFace *face = hmesh->GetFace(i);
-        int nv = face->GetNumVertices();
-        for(int j=0; j<nv; ++j) {
-            g_coarseEdges.push_back(face->GetVertex(j)->GetID());
-            g_coarseEdges.push_back(face->GetVertex((j+1)%nv)->GetID());
-            g_coarseEdgeSharpness.push_back(face->GetEdge(j)->GetSharpness());
-        }
-    }
-    int nv = hmesh->GetNumVertices();
-    for(int i=0; i<nv; ++i) {
-        g_coarseVertexSharpness.push_back(hmesh->GetVertex(i)->GetSharpness());
-    }
-}
 
 //------------------------------------------------------------------------------
 static int
@@ -335,6 +320,51 @@ createRandomSamples( int nfaces, int nsamples, std::vector<OsdEvalCoords> & coor
 
 //------------------------------------------------------------------------------
 static int
+createRandomVaryingColors( int nverts, std::vector<float> & colors ) {
+
+    colors.resize( nverts * 3 );
+
+    // large Pell prime number
+    srand( static_cast<int>(2147483647) );
+    
+    for (int i=0; i<nverts; ++i) {
+        colors[i*3+0] = (float)rand()/(float)RAND_MAX;
+        colors[i*3+1] = (float)rand()/(float)RAND_MAX;
+        colors[i*3+2] = (float)rand()/(float)RAND_MAX;
+    }
+        
+    return (int)colors.size();
+}
+
+//------------------------------------------------------------------------------
+static void
+createCoarseMesh( OsdHbrMesh * const hmesh, int nfaces ) {
+    // save coarse topology (used for coarse mesh drawing)
+    g_coarseEdges.clear();
+    g_coarseEdgeSharpness.clear();
+    g_coarseVertexSharpness.clear();
+
+    for(int i=0; i<nfaces; ++i) {
+        OsdHbrFace *face = hmesh->GetFace(i);
+        int nv = face->GetNumVertices();
+        for(int j=0; j<nv; ++j) {
+            g_coarseEdges.push_back(face->GetVertex(j)->GetID());
+            g_coarseEdges.push_back(face->GetVertex((j+1)%nv)->GetID());
+            g_coarseEdgeSharpness.push_back(face->GetEdge(j)->GetSharpness());
+        }
+    }
+    int nv = hmesh->GetNumVertices();
+    for(int i=0; i<nv; ++i) {
+        g_coarseVertexSharpness.push_back(hmesh->GetVertex(i)->GetSharpness());
+    }
+    
+    // assign a randomly generated color for each vertex ofthe mesh
+    createRandomVaryingColors(nv, g_varyingColors);
+}
+
+
+//------------------------------------------------------------------------------
+static int
 getNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
 
     OsdHbrFace * lastface = hmesh->GetFace( nfaces-1 );
@@ -343,12 +373,15 @@ getNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
     int result = lastface->GetPtexIndex();
     
     result += (hmesh->GetSubdivision()->FaceIsExtraordinary(hmesh, lastface) ? 
-                  lastface->GetNumVertices() : 0);
+                  lastface->GetNumVertices() : 1);
 
-    return ++result;
+    return result;
 }
 
 //------------------------------------------------------------------------------
+OsdCpuVertexBuffer * g_vertexData=0,
+                   * g_varyingData=0;
+
 OsdCpuComputeContext * g_computeCtx = 0;
 
 OsdCpuComputeController g_computeCtrl;
@@ -358,7 +391,10 @@ OsdCpuEvalLimitContext * g_evalCtx = 0;
 OsdCpuEvalLimitController g_evalCtrl;
 
 OsdVertexBufferDescriptor g_idesc( /*offset*/ 0, /*legnth*/ 3, /*stride*/ 3 ), 
-                          g_odesc( /*offset*/ 0, /*legnth*/ 3, /*stride*/ 6 );
+                          g_odesc( /*offset*/ 0, /*legnth*/ 3, /*stride*/ 6 ),
+                          g_vdesc( /*offset*/ 3, /*legnth*/ 3, /*stride*/ 6 ),
+                          g_fvidesc( /*offset*/ 0, /*legnth*/ 2, /*stride*/ 2 ),
+                          g_fvodesc( /*offset*/ 3, /*legnth*/ 2, /*stride*/ 6 );
 
 std::vector<OsdEvalCoords> g_coords;
 
@@ -392,9 +428,9 @@ updateGeom() {
     Stopwatch s;
     s.Start();
     
-    g_samplesVB->UpdateData( &g_positions[0], 0, nverts);
+    g_vertexData->UpdateData( &g_positions[0], 0, nverts);
     
-    g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_samplesVB );
+    g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_vertexData, g_varyingData );
 
     s.Stop();
     g_computeTime = float(s.GetElapsed() * 1000.0f);
@@ -405,16 +441,28 @@ updateGeom() {
     s.Start();
     
     // Reset the output buffer
-    float * cpubuff = g_Q->BindCpuBuffer();
-    memset( cpubuff, 0, g_Q->GetNumVertices()*g_Q->GetNumElements()*sizeof(float) );
 
     g_nsamplesFound=0;
 
     // Bind/Unbind of the vertex buffers to the context needs to happen 
     // outside of the parallel loop
-    g_evalCtx->BindVertexBuffers( g_idesc, g_samplesVB, g_odesc, g_Q, g_dQu, g_dQv );
+    g_evalCtx->GetVertexData().Bind( g_idesc, g_vertexData, g_odesc, g_Q, g_dQu, g_dQv );
 
-#ifdef OPENSUBDIV_HAS_OPENMP
+    // The varying data ends-up interleaved in the same g_Q output buffer because
+    // g_Q has a stride of 6 and g_vdesc sets the offset to 3, while g_odesc sets
+    // the offset to 0
+    switch (g_drawMode) {
+        case kVARYING     : g_evalCtx->GetVaryingData().Bind( g_idesc, g_varyingData, g_vdesc, g_Q ); break;
+
+        case kFACEVARYING : g_evalCtx->GetFaceVaryingData().Bind( g_fvidesc, g_fvodesc, g_Q );
+
+        case kUV :
+
+        default : g_evalCtx->GetVaryingData().Unbind(); break;
+    }
+
+#define USE_OPENMP
+#if defined(OPENSUBDIV_HAS_OPENMP) and defined(USE_OPENMP)
     #pragma omp parallel for
 #endif
     for (int i=0; i<(int)g_coords.size(); ++i) {
@@ -422,22 +470,39 @@ updateGeom() {
         int n = g_evalCtrl.EvalLimitSample<OsdCpuVertexBuffer,OsdCpuGLVertexBuffer>( g_coords[i], g_evalCtx, i );
 
         if (n) {
-
             // point colors
-            float * color = cpubuff + i * 6 + 3;
+            switch (g_drawMode) {
+                case kUV : { float * color = g_Q->BindCpuBuffer() + i*g_Q->GetNumElements()  + 3;
+                             color[0] = g_coords[i].u;
+                             color[1] = 0.0f;
+                             color[2] = g_coords[i].v; } break;
 
-            color[0] = g_coords[i].u;
-            color[1] = 0.0f;
-            color[2] = g_coords[i].v;
-            
-#ifdef OPENSUBDIV_HAS_OPENMP
+                case kVARYING : break;
+
+                case kFACEVARYING : break;
+                
+                default : break;
+           }
+#if defined(OPENSUBDIV_HAS_OPENMP) and defined(USE_OPENMP)
             #pragma omp atomic
 #endif
             g_nsamplesFound += n;
+        } else {
+            // "hide" unfound samples (hole tags...) as a black dot at the origin
+            float * sample = g_Q->BindCpuBuffer() + i*g_Q->GetNumElements();
+            memset(sample, 0, g_Q->GetNumElements() * sizeof(float));
         }
     }
     
-    g_evalCtx->UnbindVertexBuffers();
+    g_evalCtx->GetVertexData().Unbind();
+
+    switch (g_drawMode) {
+        case kVARYING     : g_evalCtx->GetVaryingData().Unbind(); break;
+
+        case kFACEVARYING : g_evalCtx->GetFaceVaryingData().Unbind(); break;
+
+        default : break;
+    }
     
     g_Q->BindVBO();
 
@@ -451,7 +516,7 @@ static void
 createOsdMesh( const std::string &shape, int level, Scheme scheme=kCatmark ) {
 
     // Create HBR mesh
-    OsdHbrMesh * hmesh = simpleHbr<OsdVertex>(shape.c_str(), scheme, g_orgPositions);
+    OsdHbrMesh * hmesh = simpleHbr<OsdVertex>(shape.c_str(), scheme, g_orgPositions, true);
 
     g_positions.resize(g_orgPositions.size(),0.0f);
 
@@ -463,44 +528,50 @@ createOsdMesh( const std::string &shape, int level, Scheme scheme=kCatmark ) {
 
     createCoarseMesh(hmesh, nfaces);
 
-
-
     // Create FAR mesh
     OsdFarMeshFactory factory( hmesh, level, /*adaptive*/ true);    
     
     delete g_fmesh;
-    g_fmesh = factory.Create(/*fvar*/ false);
+    g_fmesh = factory.Create(/*fvar*/ true);
     
     int nverts = g_fmesh->GetNumVertices();
     
 
     
     // Create v-buffer & populate w/ positions
-    delete g_samplesVB;
-    g_samplesVB = OsdCpuVertexBuffer::Create(3, nverts);
+    delete g_vertexData;
+    g_vertexData = OsdCpuVertexBuffer::Create(3, nverts);
 
-
-        
+    // Create primvar v-buffer & populate w/ colors or (u,v) data
+    delete g_varyingData; g_varyingData = 0;
+    if (g_drawMode==kVARYING) {
+        g_varyingData = OsdCpuVertexBuffer::Create(3, nverts);
+        g_varyingData->UpdateData( &g_varyingColors[0], 0, nverts);
+    }
+            
     // Create a Compute context, used to "pose" the vertices
     delete g_computeCtx;
     g_computeCtx = OsdCpuComputeContext::Create(g_fmesh);
     
-    g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_samplesVB );
+    g_computeCtrl.Refine( g_computeCtx, g_fmesh->GetKernelBatches(), g_vertexData, g_varyingData );
     
 
     
     // Create eval context & data buffers
     delete g_evalCtx;
-    g_evalCtx = OsdCpuEvalLimitContext::Create(g_fmesh);
+    g_evalCtx = OsdCpuEvalLimitContext::Create(g_fmesh, /*requireFVarData*/ true);
 
     delete g_Q;
     g_Q = OsdCpuGLVertexBuffer::Create(6,nsamples);
+    memset( g_Q->BindCpuBuffer(), 0, nsamples*6*sizeof(float));
 
     delete g_dQu;
     g_dQu = OsdCpuGLVertexBuffer::Create(6,nsamples);
+    memset( g_dQu->BindCpuBuffer(), 0, nsamples*6*sizeof(float));
 
     delete g_dQv;
     g_dQv = OsdCpuGLVertexBuffer::Create(6,nsamples);
+    memset( g_dQv->BindCpuBuffer(), 0, nsamples*6*sizeof(float));
         
     updateGeom();
 
@@ -680,7 +751,20 @@ drawCageVertices() {
     vbo.reserve(numPoints*6);
     float r, g, b;
     for (int i = 0; i < numPoints; ++i) {
-        setSharpnessColor(g_coarseVertexSharpness[i], &r, &g, &b);
+
+        switch (g_drawMode) {
+
+            case kVARYING : { r=g_varyingColors[i*3+0];
+                              g=g_varyingColors[i*3+1];
+                              b=g_varyingColors[i*3+2]; 
+                            } break;
+
+            case kUV      : { setSharpnessColor(g_coarseVertexSharpness[i], &r, &g, &b);
+                            } break;
+
+            default : break;
+        }
+        
         vbo.push_back(g_positions[i*3+0]);
         vbo.push_back(g_positions[i*3+1]);
         vbo.push_back(g_positions[i*3+2]);
@@ -723,7 +807,7 @@ drawSamples() {
     glBindVertexArray(g_samplesVAO);
 
     glPointSize(1.0f);
-    glDrawArrays( GL_POINTS, 0,  (int)g_coords.size() );
+    glDrawArrays( GL_POINTS, 0, (int)g_coords.size());
     glPointSize(1.0f);
 
     glBindVertexArray(0);
@@ -781,7 +865,12 @@ display() {
         g_hud.DrawString(10, -60,  "GPU Draw   : %.3f ms", drawGpuTime);
         g_hud.DrawString(10, -40,  "CPU Draw   : %.3f ms", drawCpuTime);
         g_hud.DrawString(10, -20,  "FPS        : %3.1f", fps);
-
+        
+        if (g_drawMode==kFACEVARYING and g_evalCtx->GetFVarData().empty()) {
+            static char msg[21] = "No Face-Varying Data";
+            g_hud.DrawString(g_width/2-20/2*8, g_height/2, msg);
+        }
+        
         g_hud.Flush();
     }
 
@@ -834,7 +923,7 @@ motion(int x, int y) {
 //------------------------------------------------------------------------------
 static void
 #if GLFW_VERSION_MAJOR>=3
-mouse(GLFWwindow *, int button, int state) {
+mouse(GLFWwindow *, int button, int state, int mods) {
 #else
 mouse(int button, int state) {
 #endif
@@ -887,8 +976,9 @@ setSamples(bool add)
 //------------------------------------------------------------------------------
 static void
 #if GLFW_VERSION_MAJOR>=3
-keyboard(GLFWwindow *, int key, int event) {
+keyboard(GLFWwindow *, int key, int scancode, int event, int mods) {
 #else
+#define GLFW_KEY_ESCAPE GLFW_KEY_ESC
 keyboard(int key, int event) {
 #endif
 
@@ -902,7 +992,7 @@ keyboard(int key, int event) {
         
         case '-': setSamples(false); break;
         
-        case GLFW_KEY_ESC: g_hud.SetVisible(!g_hud.IsVisible()); break;
+        case GLFW_KEY_ESCAPE: g_hud.SetVisible(!g_hud.IsVisible()); break;
     }
 }
 
@@ -953,12 +1043,41 @@ callbackFreeze(bool checked, int f)
 
 //------------------------------------------------------------------------------
 static void
+callbackDisplayCageVertices(bool checked, int d)
+{
+    g_drawCageVertices = checked;
+}
+
+//------------------------------------------------------------------------------
+static void
+callbackDisplayCageEdges(bool checked, int d)
+{
+    g_drawCageEdges = checked;
+}
+
+//------------------------------------------------------------------------------
+static void
+callbackDisplayVaryingColors(int mode)
+{
+    g_drawMode = mode;
+    createOsdMesh( g_defaultShapes[g_currentShape].data, g_level, g_defaultShapes[ g_currentShape ].scheme );
+}
+
+
+//------------------------------------------------------------------------------
+static void
 initHUD()
 {
     g_hud.Init(g_width, g_height);
 
-    g_hud.AddCheckBox("Animate vertices (M)", g_moveScale != 0, 350, 20, callbackAnimate, 0, 'm');
-    g_hud.AddCheckBox("Freeze (spc)", false, 350, 40, callbackFreeze, 0, ' ');
+    g_hud.AddCheckBox("Cage Edges (H)", true, 350, 10, callbackDisplayCageEdges, 0, 'h');
+    g_hud.AddCheckBox("Cage Verts (J)", true, 350, 30, callbackDisplayCageVertices, 0, 'j');
+    g_hud.AddCheckBox("Animate vertices (M)", g_moveScale != 0, 350, 50, callbackAnimate, 0, 'm');
+    g_hud.AddCheckBox("Freeze (spc)", false, 350, 70, callbackFreeze, 0, ' ');
+    
+    g_hud.AddRadioButton(0, "(u,v)", true, 200, 10, callbackDisplayVaryingColors, kUV, 'k');
+    g_hud.AddRadioButton(0, "varying", false, 200, 30, callbackDisplayVaryingColors, kVARYING, 'k');
+    g_hud.AddRadioButton(0, "face-varying", false, 200, 50, callbackDisplayVaryingColors, kFACEVARYING, 'k');
 
     for (int i = 1; i < 11; ++i) {
         char level[16];
@@ -1022,12 +1141,29 @@ setGLCoreProfile()
 }
 
 //------------------------------------------------------------------------------
-int main(int, char**) {
+int main(int argc, char **argv) {
 
     bool fullscreen = false;
 
+    std::string str;
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "-f"))
+            fullscreen = true;
+        else {
+            std::ifstream ifs(argv[1]);
+            if (ifs) {
+                std::stringstream ss;
+                ss << ifs.rdbuf();
+                ifs.close();
+                str = ss.str();
+                g_defaultShapes.push_back(SimpleShape(str.c_str(), argv[1], kCatmark));
+            }
+        }
+    }
+    
     OsdSetErrorCallback(callbackError);
     
+
     initializeShapes();
 
     if (not glfwInit()) {
@@ -1058,9 +1194,9 @@ int main(int, char**) {
         }
         
         if (g_primary) {
-            GLFWvidmode vidmode = glfwGetVideoMode(g_primary);
-            g_width = vidmode.width;
-            g_height = vidmode.height;
+            GLFWvidmode const * vidmode = glfwGetVideoMode(g_primary);
+            g_width = vidmode->width;
+            g_height = vidmode->height;
         }
     }
 
@@ -1091,7 +1227,7 @@ int main(int, char**) {
     glfwSetWindowCloseCallback(windowClose);
 #endif
     
-#if not defined(__APPLE__)
+#if defined(OSD_USES_GLEW)
 #ifdef CORE_PROFILE
     // this is the only way to initialize glew correctly under core profile context.
     glewExperimental = true;

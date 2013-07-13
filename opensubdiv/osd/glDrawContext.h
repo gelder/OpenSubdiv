@@ -57,28 +57,14 @@
 #ifndef OSD_GL_DRAW_CONTEXT_H
 #define OSD_GL_DRAW_CONTEXT_H
 
-#if defined(__APPLE__)
-    #include "TargetConditionals.h"
-    #if TARGET_OS_IPHONE or TARGET_IPHONE_SIMULATOR
-        #include <OpenGLES/ES2/gl.h>
-    #else
-        #include <OpenGL/gl3.h>
-    #endif
-#elif defined(ANDROID)
-    #include <GLES2/gl2.h>
-#else
-    #if defined(_WIN32)
-        #include <windows.h>
-    #endif
-    #include <GL/gl.h>
-#endif
-
 #include "../version.h"
 
 #include "../far/mesh.h"
 #include "../osd/drawContext.h"
 #include "../osd/drawRegistry.h"
 #include "../osd/vertex.h"
+
+#include "../osd/opengl.h"
 
 #include <map>
 
@@ -122,20 +108,60 @@ public:
     /// true if the GL version detected supports shader tessellation
     static bool SupportsAdaptiveTessellation();
 
-    GLuint patchIndexBuffer;
+    /// Returns the GL texture buffer containing the patch control vertices array
+    GLuint GetPatchIndexBuffer() const {
+        return _patchIndexBuffer;
+    }
 
 #if defined(GL_ES_VERSION_2_0)
-    GLuint patchTrianglesIndexBuffer;
+    /// Returns the GL a VBO containing a triangulated version of the mesh
+    GLuint GetPatchTrianglesIndexBUffer() const {
+        return _patchTrianglesIndexBuffer;
+    }
 #endif
 
-    GLuint ptexCoordinateTextureBuffer;
-    GLuint fvarDataTextureBuffer;
+    /// Returns the GL texture buffer containing the patch local parameterization
+    /// data
+    GLuint GetPatchParamTextureBuffer() const {
+        return _patchParamTextureBuffer;
+    }
 
-    GLuint vertexTextureBuffer;
-    GLuint vertexValenceTextureBuffer;
-    GLuint quadOffsetTextureBuffer;
+    /// Returns the GL texture buffer containing the vertex data
+    GLuint GetVertexTextureBuffer() const {
+        return _vertexTextureBuffer;
+    }
+
+    /// Returns the GL texture buffer containing patch vertex valence data (only
+    /// used by Gregory patches)
+    GLuint GetVertexValenceTextureBuffer() const {
+        return _vertexValenceTextureBuffer;
+    }
+
+    /// Returns the GL texture buffer containing patch quad offsets data (only
+    /// used by Gregory patches)
+    GLuint GetQuadOffsetsTextureBuffer() const {
+        return _quadOffsetsTextureBuffer;
+    }
+
+    /// Returns the GL texture buffer containing fvar data
+    GLuint GetFvarDataTextureBuffer() const {
+        return _fvarDataTextureBuffer;
+    }
 
 protected:
+    GLuint _patchIndexBuffer;
+
+#if defined(GL_ES_VERSION_2_0)
+    GLuint _patchTrianglesIndexBuffer;
+#endif
+
+    GLuint _patchParamTextureBuffer;
+    GLuint _fvarDataTextureBuffer;
+
+    GLuint _vertexTextureBuffer;
+    GLuint _vertexValenceTextureBuffer;
+    GLuint _quadOffsetsTextureBuffer;
+
     OsdGLDrawContext();
 
     // allocate buffers from patchTables
