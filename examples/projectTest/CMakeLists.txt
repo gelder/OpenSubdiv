@@ -59,6 +59,7 @@
 
 set(PLATFORM_LIBRARIES
     ${OSD_LINK_TARGET}
+    tessellator
 )
 
 include_directories(
@@ -68,8 +69,6 @@ include_directories(
 
 add_executable(projectTest
     main.cpp
-    shape.h
-    shape.cpp
     ${INC_FILES}
 )
 

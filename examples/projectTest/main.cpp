@@ -66,7 +66,7 @@
 #include <osd/mesh.h>
 #include <osd/vertex.h>
 
-#include "shape.h"
+#include "../tessellator/shape.h"
 
 #include "../common/stopwatch.h"
 
@@ -92,23 +92,6 @@ typedef FarMesh<OsdVertex>              OsdFarMesh;
 typedef FarMeshFactory<OsdVertex>       OsdFarMeshFactory;
 typedef FarSubdivisionTables<OsdVertex> OsdFarMeshSubdivision;
 
-
-#ifdef NOT_NEEDED
-//------------------------------------------------------------------------------
-static int
-GetNumPtexFaces( OsdHbrMesh const * hmesh, int nfaces ) {
-
-    OsdHbrFace * lastface = hmesh->GetFace( nfaces-1 );
-    assert(lastface);
-    
-    int result = lastface->GetPtexIndex();
-    
-    result += (hmesh->GetSubdivision()->FaceIsExtraordinary(hmesh, lastface) ? 
-                  lastface->GetNumVertices() : 0);
-
-    return ++result;
-}
-#endif
 
 
 //------------------------------------------------------------------------------
